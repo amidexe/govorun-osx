@@ -1,0 +1,202 @@
+import Foundation
+import CoreAudio
+import AVFoundation
+import os
+
+@MainActor
+final class AudioEngine: ObservableObject {
+    enum State { case idle, recording, processing }
+
+    @Published var state: State = .idle
+    @Published var audioLevel: Double = 0
+    @Published var transcribedText: String = ""
+
+    private var recorder: CoreAudioRecorder?
+    private var recordingURL: URL?
+    private var levelTimer: DispatchSourceTimer?
+    private let gigaAM = GigaAMEngine()
+    private let logger = Logger(subsystem: "com.govorun.app", category: "AudioEngine")
+
+    // Silero VAD (rebuilt when pause setting changes)
+    private var vad: SileroVAD?
+    private var lastPause: PauseLength = .medium
+
+    // PCM window accumulator — Silero needs exactly 512 samples per call
+    private var windowBuf: [Float] = []
+
+    // Streaming transcription
+    private var accumulated      = ""
+    private var chunkResults     = [Int: String]()
+    private var nextChunkIdx     = 0
+    private var nextFlushIdx     = 0
+    private var pendingTasks     = [Task<Void, Never>]()
+    // Только реальная речь (VAD-сегменты), без пауз
+    private(set) var speechSamples: Int = 0
+
+    func startRecording() async throws {
+        guard state == .idle else { return }
+        state = .recording
+        transcribedText = ""
+
+        accumulated   = ""
+        chunkResults  = [:]
+        nextChunkIdx  = 0
+        nextFlushIdx  = 0
+        pendingTasks  = []
+        windowBuf     = []
+        speechSamples = 0
+
+        let pause = PauseLength.stored
+        if vad == nil || lastPause != pause {
+            vad = SileroVAD(pauseLength: pause)
+            lastPause = pause
+        }
+        vad?.reset()
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("govorun_\(Int(Date().timeIntervalSince1970)).wav")
+        recordingURL = url
+
+        let rec = CoreAudioRecorder()
+        recorder = rec
+        let deviceID = defaultInputDeviceID()
+        try rec.startRecording(toOutputFile: url, deviceID: deviceID)
+        startLevelTimer()
+        logger.info("Recording started → \(url.lastPathComponent)")
+    }
+
+    func stopRecording() async throws -> String {
+        guard state == .recording else { return "" }
+        state = .processing
+        stopLevelTimer()
+        audioLevel = 0
+
+        // Drain remaining PCM from recorder
+        let remaining = recorder?.drainSamples() ?? []
+        recorder?.stopRecording()
+        recorder = nil
+
+        // Feed remaining + flush VAD to get final segment
+        if let vad {
+            var leftovers = windowBuf + remaining
+            // Feed full windows
+            while leftovers.count >= SileroVAD.windowSize {
+                let win = Array(leftovers.prefix(SileroVAD.windowSize))
+                leftovers.removeFirst(SileroVAD.windowSize)
+                let segs = vad.accept(win)
+                for s in segs where s.count > 1600 { scheduleChunk(s) }
+            }
+            // Flush for final segment
+            let finalSegs = vad.flushAndDrain()
+            for s in finalSegs where s.count > 1600 { scheduleChunk(s) }
+            // Raw tail fallback: if nothing came from VAD but we have audio
+            if finalSegs.isEmpty && !leftovers.isEmpty && leftovers.count > 1600 {
+                scheduleChunk(leftovers)
+            }
+        } else if remaining.count > 1600 {
+            scheduleChunk(remaining)
+        }
+        windowBuf = []
+
+        for task in pendingTasks { await task.value }
+        pendingTasks = []
+        flushResults()
+
+        if let url = recordingURL {
+            recordingURL = nil
+            try? FileManager.default.removeItem(at: url)
+        }
+
+        let result = accumulated
+        transcribedText = result
+        accumulated  = ""
+        chunkResults = [:]
+        nextChunkIdx = 0
+        nextFlushIdx = 0
+
+        state = .idle
+        logger.info("Final: \(result.prefix(80))")
+        return result
+    }
+
+    private func scheduleChunk(_ samples: [Float]) {
+        speechSamples += samples.count
+        let idx = nextChunkIdx
+        nextChunkIdx += 1
+        let task = Task<Void, Never> { [weak self] in
+            await self?.processChunk(samples, index: idx)
+        }
+        pendingTasks.append(task)
+    }
+
+    private func processChunk(_ samples: [Float], index: Int) async {
+        do {
+            let text = try await gigaAM.transcribeSamples(samples)
+            chunkResults[index] = text
+        } catch {
+            chunkResults[index] = ""
+            logger.error("Chunk \(index) error: \(error.localizedDescription)")
+        }
+        flushResults()
+    }
+
+    private func flushResults() {
+        while let text = chunkResults[nextFlushIdx] {
+            let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty {
+                accumulated += accumulated.isEmpty ? t : " " + t
+                transcribedText = accumulated
+            }
+            chunkResults.removeValue(forKey: nextFlushIdx)
+            nextFlushIdx += 1
+        }
+    }
+
+    private func startLevelTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(32))
+        timer.setEventHandler { [weak self] in
+            guard let self, let rec = self.recorder else { return }
+
+            // Level meter — floor -70dB so whispers (≈-55dB) show visibly
+            let db = rec.averagePower
+            let minDb: Float = -70
+            let norm = db < minDb ? 0.0 : Double((db - minDb) / (-minDb))
+            self.audioLevel = max(0, min(1, norm))
+
+            // Pull new samples and feed Silero VAD in 512-sample windows
+            guard let vad = self.vad else { return }
+            let newSamples = rec.drainSamples()
+            guard !newSamples.isEmpty else { return }
+
+            self.windowBuf.append(contentsOf: newSamples)
+            while self.windowBuf.count >= SileroVAD.windowSize {
+                let win = Array(self.windowBuf.prefix(SileroVAD.windowSize))
+                self.windowBuf.removeFirst(SileroVAD.windowSize)
+                let segs = vad.accept(win)
+                for seg in segs where seg.count > 1600 {
+                    self.scheduleChunk(seg)
+                }
+            }
+        }
+        timer.resume()
+        levelTimer = timer
+    }
+
+    private func stopLevelTimer() {
+        levelTimer?.cancel()
+        levelTimer = nil
+    }
+
+    private func defaultInputDeviceID() -> AudioDeviceID {
+        var deviceID: AudioDeviceID = kAudioObjectUnknown
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &deviceID)
+        return deviceID
+    }
+}

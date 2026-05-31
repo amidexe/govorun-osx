@@ -1,0 +1,44 @@
+# Xcode build artifacts
+.build/
+*.xcuserstate
+xcuserdata/
+DerivedData/
+
+# Generated project (создаётся через make/xcodegen)
+Govorun.xcodeproj/
+
+# Локальный симлинк на sherpa-onnx xcframework
+Frameworks/
+
+# Модель GigaAM (~300 МБ, устанавливается через make setup)
+Govorun/Resources/Model/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Дистрибутив (выкладывается через GitHub Releases, не в репозиторий)
+*.dmg
+
+# Временные файлы
+*.orig
+*.log
+
+# Чувствительные данные
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.p12
+*.cer
+*.pfx
+.netrc
+secrets.*
+*.secret
+*token*
+*apikey*
+config.local.*
+
+# Claude Code — локальные настройки (могут содержать токены MCP и прочее)
+.claude/settings.local.json

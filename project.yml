@@ -1,0 +1,40 @@
+name: Govorun
+options:
+  bundleIdPrefix: com.govorun
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+
+targets:
+  Govorun:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: Govorun
+        excludes:
+          - "Resources/**"
+          - "Assets.xcassets/**"
+    resources:
+      - path: Govorun/Assets.xcassets
+      - path: Govorun/Resources/Model
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.govorun.app
+        INFOPLIST_FILE: Govorun/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Govorun/Govorun.entitlements
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: NO
+        FRAMEWORK_SEARCH_PATHS: "$(inherited) $(PROJECT_DIR)/Frameworks"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        PRODUCT_NAME: Говорун
+    frameworks:
+      - path: Frameworks/sherpa-onnx.xcframework
+        embed: true
+        sign: false
