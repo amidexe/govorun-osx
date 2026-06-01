@@ -33,6 +33,7 @@ final class FloatingWindowController: NSWindowController {
     }
 
     func show() {
+        NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
         positionPanel()
         window?.alphaValue = 0
         window?.orderFront(nil)

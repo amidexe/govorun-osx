@@ -5,7 +5,7 @@ struct FloatingRecorderView: View {
     @Environment(\.colorScheme) var colorScheme
 
     @State private var pulse          = false
-    @State private var sessionCount:  Int = SessionStats.sessionCountToday
+    @State private var sessionCount:  Int = 0
     @State private var yellowLimit:   Int = WarningSettings.yellowSessions
     @State private var redLimit:      Int = WarningSettings.redSessions
     static let size: CGFloat = 44
