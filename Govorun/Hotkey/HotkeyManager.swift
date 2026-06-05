@@ -17,12 +17,18 @@ final class HotkeyManager {
     nonisolated(unsafe) private var cfg:           HotkeyConfig = HotkeyConfig.stored
     nonisolated(unsafe) private var cancelCfg:     HotkeyConfig = HotkeyConfig.cancelStored ?? HotkeyConfig.defaultCancel
     nonisolated(unsafe) private var modifierIsDown = false
+    // True, пока проглочен keyDown нашего хоткея-клавиши и ещё не пришёл парный keyUp.
+    // Гарантирует симметрию: keyUp глотаем ТОЛЬКО если проглотили его keyDown.
+    // Иначе ОС увидит нажатие, но не увидит отпускания → клавиша «залипнет»
+    // (аппаратный автоповтор, переживает выход из приложения).
+    nonisolated(unsafe) private var keyHotkeyDown = false
     nonisolated(unsafe) var isRecording = false
 
     func reloadConfig() {
         cfg = HotkeyConfig.stored
         cancelCfg = HotkeyConfig.cancelStored ?? HotkeyConfig.defaultCancel
         modifierIsDown = false
+        keyHotkeyDown = false
     }
 
     func start() {
@@ -64,6 +70,7 @@ final class HotkeyManager {
             eventTap = nil
         }
         modifierIsDown = false
+        keyHotkeyDown = false
     }
 
     func suspendForRecorder() {
@@ -72,6 +79,7 @@ final class HotkeyManager {
     func resumeAfterRecorder() {
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
         modifierIsDown = false
+        keyHotkeyDown = false
     }
 
     // MARK: - Event handler
@@ -111,12 +119,25 @@ final class HotkeyManager {
         guard kc == Int64(cfg.keyCode) else { return Unmanaged.passUnretained(event) }
 
         if type == .keyDown {
-            guard flags.isSuperset(of: mods)       else { return Unmanaged.passUnretained(event) }
-            guard flags.intersection(excl).isEmpty  else { return Unmanaged.passUnretained(event) }
-            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+            // Не наш аккорд (нет нужных модификаторов или есть лишние) — пропускаем
+            // как обычную клавишу и НЕ помечаем как проглоченную.
+            guard flags.isSuperset(of: mods),
+                  flags.intersection(excl).isEmpty
+            else { return Unmanaged.passUnretained(event) }
+
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 {
+                // Автоповтор клавиши, которой мы уже владеем, — продолжаем глотать.
+                return keyHotkeyDown ? nil : Unmanaged.passUnretained(event)
+            }
+            keyHotkeyDown = true
             Task { @MainActor in self.onKeyDown?() }
             return nil
         }
+
+        // keyUp: глотаем ТОЛЬКО если проглотили парный keyDown. Иначе ОС не увидит
+        // отпускания и клавиша залипнет (бесконечный автоповтор).
+        guard keyHotkeyDown else { return Unmanaged.passUnretained(event) }
+        keyHotkeyDown = false
         Task { @MainActor in self.onKeyUp?() }
         return nil
     }

@@ -84,3 +84,14 @@ System prompt stored in UserDefaults key `llmSystemPrompt`. Default in `LLMCorre
 ## Stats
 
 `SessionStats.record(text:)` called after each recording session. Increments all-time and today counters. Today counters reset automatically when date changes (no alarm needed — date compared on each read).
+
+## Безопасность ввода (инварианты — НЕ нарушать)
+
+Приложение синтезирует ввод (⌘V в `PasteManager`) и перехватывает клавиши глобальным CGEvent-tap (`HotkeyManager`). Ошибка здесь = спам ввода / залипшая клавиша на уровне ОС, переживающая выход из приложения (лечится только перезагрузкой). Инциденты: бесконечная вставка пробелов (2026-06).
+
+Жёсткие правила:
+1. **Симметрия перехвата.** В `handleKey` `keyUp` глотается ТОЛЬКО если был проглочен парный `keyDown` (флаг `keyHotkeyDown`). Нельзя глотать `keyUp` без `keyDown` — иначе ОС считает клавишу зажатой → автоповтор. Флаг сбрасывается в `stop()`, `reloadConfig()`, `resumeAfterRecorder()`.
+2. **Single-flight на вставку.** `finishRecording` защищён флагом `isFinishing` — никаких наложений/петель вставки.
+3. **Не вставлять пустое.** Проверка непустоты — ПОСЛЕ LLM, прямо перед `PasteManager.paste`. Иначе пустой ответ LLM → в буфер уезжает голый пробел (мы добавляем `text + " "`).
+
+Память для пользователя: «выключение из трея» перетаскиванием значка НЕ завершает процесс. Реальный выход — пункт «Завершить Говорун» или `killall Говорун`.

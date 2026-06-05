@@ -44,6 +44,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     private var recordingState: RecordingState = .idle
     private let pttThreshold: TimeInterval = 0.35
+    // Single-flight: пока идёт завершение записи + вставка, повторный вход запрещён.
+    // Защищает от любой петли/наложения, которая могла бы спамить вставку.
+    private var isFinishing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -293,6 +296,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func finishRecording() async {
+        // Single-flight: не даём завершению/вставке наложиться или зациклиться.
+        guard !isFinishing else { return }
+        isFinishing = true
+        defer { isFinishing = false }
+
         hotkeyManager.isRecording = false
         let startedAt: Date? = { if case .recording(let t) = recordingState { return t }; return nil }()
         recordingState = .idle
@@ -322,6 +330,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         NSLog("[LLM] ERROR: %@", error.localizedDescription)
                     }
                 }
+                // Перепроверяем уже ПОСЛЕ LLM: если коррекция вернула пусто/пробелы,
+                // ничего не вставляем — иначе в буфер уедет один голый пробел.
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
                 // Suspend tap so our own synthetic ⌘V doesn't re-trigger the hotkey
                 hotkeyManager.suspendForRecorder()
                 PasteManager.paste(text + " ")
