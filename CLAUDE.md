@@ -4,8 +4,7 @@ Native SwiftUI + AppKit speech-to-text app. Records mic, transcribes via GigaAM 
 
 ## Repository
 
-GitHub: https://github.com/amidexe/govorun-osx (приватный)
-Local: /Users/tttt/projects/govorun-osx
+GitHub: https://github.com/amidexe/govorun-osx
 
 ## Build
 
