@@ -14,7 +14,7 @@
 
 ## Установка
 
-1. Скачайте **Говорун.dmg** из [Releases](https://github.com/amidexe/govorun-osx/releases/latest)
+1. Скачайте **govorun.dmg** из [Releases](https://github.com/amidexe/govorun-osx/releases/latest)
 2. Откройте DMG и перетащите приложение в папку «Программы»
 3. При первом запуске следуйте инструкции ниже
 

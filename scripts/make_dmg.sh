@@ -1,8 +1,10 @@
 #!/bin/bash
 set -e
 
+# Имя .app — кириллицей (CFBundleName), но имя DMG-файла — ASCII:
+# GitHub Releases не принимает не-ASCII имена ассетов и молча заменяет их на default.dmg.
 APP=".build/Build/Products/Debug/Говорун.app"
-DMG="Говорун.dmg"
+DMG="govorun.dmg"
 STAGING="/tmp/govorun_dmg_stage"
 VOLUME="Говорун"
 
