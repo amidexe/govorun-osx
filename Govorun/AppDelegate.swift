@@ -289,6 +289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try await audioEngine.startRecording()
         } catch {
+            hotkeyManager.isRecording = false
             recordingState = .idle
             audioMuter.unmuteIfNeeded()
             floatingWindowController?.hide()
@@ -322,12 +323,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     showStatsPopoverAuto()
                 }
                 if LLMSettings.isEnabled {
-                    let original = text
                     do {
                         text = try await LLMCorrector.shared.correct(text)
-                        NSLog("[LLM] OK \(original.count)→\(text.count)\nIN:  \(original)\nOUT: \(text)")
                     } catch {
-                        NSLog("[LLM] ERROR: %@", error.localizedDescription)
                     }
                 }
                 // Перепроверяем уже ПОСЛЕ LLM: если коррекция вернула пусто/пробелы,

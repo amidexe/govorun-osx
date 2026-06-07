@@ -79,7 +79,8 @@ final class HotkeyManager {
     func resumeAfterRecorder() {
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
         modifierIsDown = false
-        keyHotkeyDown = false
+        // keyHotkeyDown НЕ сбрасываем здесь: если клавиша ещё зажата, тап
+        // продолжит глотать автоповтор. Флаг обнулится сам, когда придёт keyUp.
     }
 
     // MARK: - Event handler
@@ -168,8 +169,11 @@ final class HotkeyManager {
             if kc == cfg.keyCode {
                 modifierIsDown = false
                 Task { @MainActor in self.onKeyUp?() }
+                return nil
             }
-            return nil
+            // Не глотаем события других модификаторов — иначе их состояние
+            // зависнет в ОС и последующий ввод станет непредсказуемым.
+            return Unmanaged.passUnretained(event)
         }
     }
 }
