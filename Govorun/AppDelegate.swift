@@ -98,6 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showContextMenu()
             return
         }
+        if isRecordingActive {
+            Task { @MainActor in await self.finishRecording() }
+            return
+        }
         if let p = statsPopover, p.isShown {
             p.close()
         } else {
@@ -122,7 +126,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if !axOk || !micOk { menu.addItem(.separator()) }
 
-        let settingsItem = NSMenuItem(title: "Настройки…", action: #selector(openSettings), keyEquivalent: ",")
+        if isRecordingActive {
+            let stopItem = NSMenuItem(title: "Остановить запись", action: #selector(stopRecordingFromMenu), keyEquivalent: "")
+            stopItem.target = self
+            menu.addItem(stopItem)
+
+            let cancelItem = NSMenuItem(title: "Отменить запись", action: #selector(cancelRecordingFromMenu), keyEquivalent: "")
+            cancelItem.target = self
+            menu.addItem(cancelItem)
+            menu.addItem(.separator())
+        }
+
+        let settingsItem = NSMenuItem(title: "Настройки…", action: #selector(openSettings), keyEquivalent: "")
         settingsItem.target = self
         menu.addItem(settingsItem)
 
@@ -131,7 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(resetItem)
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Завершить Говорун", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Завершить Говорун", action: #selector(NSApplication.terminate(_:)), keyEquivalent: ""))
 
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
@@ -196,6 +211,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SessionStats.resetToday()
             NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
         }
+    }
+
+    @objc private func stopRecordingFromMenu() {
+        Task { @MainActor in await self.finishRecording() }
+    }
+
+    @objc private func cancelRecordingFromMenu() {
+        Task { @MainActor in await self.abortRecording() }
     }
 
     @objc func openSettings() {
@@ -307,13 +330,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private var isRecordingActive: Bool {
+        if case .idle = recordingState { return false }
+        return true
+    }
+
     private func startRecording() async {
         hotkeyManager.isRecording = true
         floatingWindowController?.show()
-        RecordingSound.playStart()       // mute внутри muter отложен, чтобы стартовый звук не обрезался
-        audioMuter.muteIfNeeded()
+        RecordingSound.playStart()
         do {
             try await audioEngine.startRecording()
+            audioMuter.muteIfNeeded()
             scheduleMaxDurationStop()
         } catch {
             hotkeyManager.isRecording = false

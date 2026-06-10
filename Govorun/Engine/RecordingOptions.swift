@@ -63,13 +63,10 @@ final class SystemAudioMuter {
     private var didMute      = false
     private var wasAlreadyMuted = false
     private var muteTask: Task<Void, Never>?
-    private var unmuteTask: Task<Void, Never>?
     private var generation = 0
 
     func muteIfNeeded(afterDelayNanoseconds delay: UInt64 = 250_000_000) {
         guard RecordingOptions.muteAudioDuringRecording else { return }
-        unmuteTask?.cancel()
-        unmuteTask = nil
         muteTask?.cancel()
         generation += 1
         let myGeneration = generation
@@ -86,23 +83,17 @@ final class SystemAudioMuter {
         generation += 1
         muteTask?.cancel()
         muteTask = nil
-        unmuteTask?.cancel()
-        unmuteTask = nil
         guard RecordingOptions.muteAudioDuringRecording else {
             didMute = false
             wasAlreadyMuted = false
             return
         }
         let shouldUnmute = didMute && !wasAlreadyMuted
-        let myGeneration = generation
-        unmuteTask = Task { @MainActor [weak self] in
-            guard let self, !Task.isCancelled, self.generation == myGeneration else { return }
-            if shouldUnmute {
-                self.setSystemMuted(false)
-            }
-            self.didMute = false
-            self.wasAlreadyMuted = false
+        if shouldUnmute {
+            setSystemMuted(false)
         }
+        didMute = false
+        wasAlreadyMuted = false
     }
 
     private func muteNow() {
