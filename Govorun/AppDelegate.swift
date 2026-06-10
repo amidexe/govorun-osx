@@ -59,6 +59,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenuBar()
         floatingWindowController = FloatingWindowController()
         requestPermissionsAndSetupHotkey()
+        openSettingsForSmokeTestIfNeeded()
+    }
+
+    private func openSettingsForSmokeTestIfNeeded() {
+        #if DEBUG
+        guard ProcessInfo.processInfo.environment["GOVORUN_OPEN_SETTINGS_ON_LAUNCH"] == "1" else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.openSettings()
+        }
+        #endif
     }
 
     // MARK: - Menu bar

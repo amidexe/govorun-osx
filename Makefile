@@ -11,7 +11,7 @@ SHERPA_TMP := sherpa-onnx-$(SHERPA_VER)-macos-xcframework-static
 GIGAAM_HF  := https://huggingface.co/istupakov/gigaam-v3-onnx/resolve/main
 SILERO_URL := https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx
 
-.PHONY: all setup setup-sherpa setup-model generate build local run install clean dmg
+.PHONY: all setup setup-sherpa setup-model generate build local run install smoke-settings clean dmg
 
 all: setup generate build install
 
@@ -80,6 +80,9 @@ install:
 	@cp -R $(BUILD_DIR)/Build/Products/Debug/Говорун.app /Applications/
 	@echo "==> Запускаю..."
 	@open /Applications/Говорун.app
+
+smoke-settings: build
+	@bash scripts/smoke_settings_cpu.sh
 
 run:
 	@open $(BUILD_DIR)/Build/Products/Debug/Говорун.app 2>/dev/null || \

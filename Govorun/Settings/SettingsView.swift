@@ -3,10 +3,36 @@ import ApplicationServices
 import AVFoundation
 import ServiceManagement
 
+private enum SettingsTab: String, CaseIterable, Identifiable {
+    case general
+    case llm
+    case stats
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: return "Основные"
+        case .llm:     return "LLM"
+        case .stats:   return "Статистика"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .general: return "gearshape"
+        case .llm:     return "sparkles"
+        case .stats:   return "chart.bar"
+        }
+    }
+}
+
 struct SettingsView: View {
     var onHotkeyChanged: () -> Void = {}
 
     @EnvironmentObject var engine: AudioEngine
+
+    @State private var selectedTab: SettingsTab = .general
 
     // General
     @State private var accessibilityGranted = AXIsProcessTrusted()
@@ -26,288 +52,304 @@ struct SettingsView: View {
     @State private var warningRed:      Int  = WarningSettings.redMinutes
 
     // LLM
-    @State private var llmEnabled:     Bool        = LLMSettings.isEnabled
-    @State private var llmProvider:    LLMProvider = LLMSettings.provider
-    @State private var llmURL:         String      = LLMSettings.serverURL
-    @State private var llmKey:         String      = LLMSettings.apiKey
-    @State private var llmModel:       String      = LLMSettings.model
-    @State private var llmModels:      [String]    = []
-    @State private var llmLoading:     Bool        = false
-    @State private var llmError:       String?     = nil
-    @State private var llmMinLength:   Int         = LLMSettings.minLength
-    @State private var llmProxyEnabled:Bool        = LLMSettings.proxyEnabled
-    @State private var llmProxyURL:    String      = LLMSettings.proxyURL
-    @State private var llmPrompt:      String      = LLMSettings.systemPrompt
+    @State private var llmEnabled:      Bool        = LLMSettings.isEnabled
+    @State private var llmProvider:     LLMProvider = LLMSettings.provider
+    @State private var llmURL:          String      = LLMSettings.serverURL
+    @State private var llmKey:          String      = LLMSettings.apiKey
+    @State private var llmModel:        String      = LLMSettings.model
+    @State private var llmModels:       [String]    = []
+    @State private var llmLoading:      Bool        = false
+    @State private var llmError:        String?     = nil
+    @State private var llmMinLength:    Int         = LLMSettings.minLength
+    @State private var llmProxyEnabled: Bool        = LLMSettings.proxyEnabled
+    @State private var llmProxyURL:     String      = LLMSettings.proxyURL
+    @State private var llmPrompt:       String      = LLMSettings.systemPrompt
 
     // About
     @State private var showLicenses = false
     @State private var showAbout    = false
 
     var body: some View {
-        TabView {
-            generalTab
-                .tabItem { Label("Основные", systemImage: "gearshape") }
-            llmTab
-                .tabItem { Label("LLM", systemImage: "sparkles") }
-            StatsView()
-                .tabItem { Label("Статистика", systemImage: "chart.bar") }
+        VStack(spacing: 0) {
+            SettingsTabBar(selection: $selectedTab)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+
+            Divider()
+
+            Group {
+                switch selectedTab {
+                case .general:
+                    generalTab
+                case .llm:
+                    llmTab
+                case .stats:
+                    StatsView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(width: 460, height: 560)
         .onAppear {
             accessibilityGranted = AXIsProcessTrusted()
             micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         }
+        .sheet(isPresented: $showDictionary) { DictionaryEditorView() }
+        .sheet(isPresented: $showAbout) { aboutSheet }
     }
 
     // MARK: - Таб «Основные»
 
     private var generalTab: some View {
-        Form {
-            Section("Горячие клавиши") {
-                LabeledContent("Запуск / остановка") {
+        SettingsPage {
+            SettingsSection("Горячие клавиши") {
+                SettingsRow("Запуск / остановка") {
                     HotkeyRecorderView(config: $hotkey) {
-                        HotkeyConfig.stored = hotkey; onHotkeyChanged()
+                        HotkeyConfig.stored = hotkey
+                        onHotkeyChanged()
                     }
                 }
-                LabeledContent("Отмена записи") {
+                SettingsRow("Отмена записи") {
                     HotkeyRecorderView(config: $cancelHotkey) {
-                        HotkeyConfig.cancelStored = cancelHotkey; onHotkeyChanged()
+                        HotkeyConfig.cancelStored = cancelHotkey
+                        onHotkeyChanged()
                     }
                 }
                 Text("Удержание — PTT. Короткое нажатие — переключение.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            Section("Словарь замен") {
-                LabeledContent {
+            SettingsSection("Словарь замен") {
+                SettingsRow("Замены слов и фраз", subtitle: "Применяются до LLM-обработки") {
                     Button("Открыть…") { showDictionary = true }
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Замены слов и фраз")
-                        Text("Применяются до LLM-обработки")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
                 }
             }
-            .sheet(isPresented: $showDictionary) { DictionaryEditorView() }
 
-            Section("Распознавание") {
-                LabeledContent {
+            SettingsSection("Распознавание") {
+                SettingsRow("Пауза между фразами", subtitle: "После паузы фраза считается завершённой") {
                     Stepper(pauseLabel, onIncrement: incrementPause, onDecrement: decrementPause)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Пауза между фразами")
-                        Text("После паузы фраза считается завершённой")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
+                        .frame(width: 104, alignment: .trailing)
                 }
-                LabeledContent {
+                SettingsRow("Макс. длительность записи", subtitle: "Запись сама остановится и распознается по достижении лимита") {
                     Stepper(maxRecLabel, value: $maxRecMinutes, in: 0...180, step: 5)
+                        .frame(width: 142, alignment: .trailing)
                         .onChange(of: maxRecMinutes) { RecordingOptions.maxRecordingMinutes = max(0, $0) }
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Макс. длительность записи")
-                        Text("Запись сама остановится и распознается по достижении лимита")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
                 }
             }
 
-            Section("Напоминание об отдыхе") {
+            SettingsSection("Напоминание об отдыхе") {
                 Toggle(isOn: $warningsEnabled) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Следить за дневной нагрузкой")
-                        Text("Иконка меняет цвет, когда диктовок слишком много")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
+                    RowLabel(
+                        title: "Следить за дневной нагрузкой",
+                        subtitle: "Иконка меняет цвет, когда диктовок слишком много"
+                    )
                 }
                 .onChange(of: warningsEnabled) { WarningSettings.isEnabled = $0 }
+
                 if warningsEnabled {
-                    LabeledContent {
-                        Stepper("\(warningYellow) мин", value: $warningYellow, in: 5...(warningRed - 5), step: 5)
+                    SettingsRow("Жёлтая зона от", subtitle: "Минут речи за день, после которых копится усталость") {
+                        Stepper("\(warningYellow) мин", value: $warningYellow, in: yellowRange, step: 5)
+                            .frame(width: 116, alignment: .trailing)
                             .onChange(of: warningYellow) {
-                                WarningSettings.yellowMinutes = $0
+                                warningYellow = min($0, warningRed - 5)
+                                WarningSettings.yellowMinutes = warningYellow
                                 NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
                             }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("🟡  Жёлтая зона от")
-                            Text("Минут речи за день, после которых копится усталость")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
                     }
-                    LabeledContent {
-                        Stepper("\(warningRed) мин", value: $warningRed, in: (warningYellow + 5)...600, step: 5)
+                    SettingsRow("Красная зона от", subtitle: "Слишком много речи за день — возьми паузу") {
+                        Stepper("\(warningRed) мин", value: $warningRed, in: redRange, step: 5)
+                            .frame(width: 116, alignment: .trailing)
                             .onChange(of: warningRed) {
-                                WarningSettings.redMinutes = $0
+                                warningRed = max($0, warningYellow + 5)
+                                WarningSettings.redMinutes = warningRed
                                 NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
                             }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("🔴  Красная зона от")
-                            Text("Слишком много речи за день — возьми паузу")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
                     }
                 }
             }
 
-            Section("Система") {
+            SettingsSection("Система") {
                 Toggle("Звук начала и конца записи", isOn: $playSounds)
                     .onChange(of: playSounds) { RecordingOptions.playRecordingSounds = $0 }
                 Toggle("Приглушить звук при записи", isOn: $muteAudio)
                     .onChange(of: muteAudio) { RecordingOptions.muteAudioDuringRecording = $0 }
                 Toggle("Запускать при входе в систему", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { v in
-                        do { if v { try SMAppService.mainApp.register() }
-                             else { try SMAppService.mainApp.unregister() } }
-                        catch { launchAtLogin = SMAppService.mainApp.status == .enabled }
+                        do {
+                            if v { try SMAppService.mainApp.register() }
+                            else { try SMAppService.mainApp.unregister() }
+                        } catch {
+                            launchAtLogin = SMAppService.mainApp.status == .enabled
+                        }
                     }
             }
 
-            Section("Разрешения") {
-                PermissionRow(granted: accessibilityGranted, label: "Специальные возможности",
-                              url: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-                PermissionRow(granted: micGranted, label: "Микрофон",
-                              url: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+            SettingsSection("Разрешения") {
+                PermissionRow(
+                    granted: accessibilityGranted,
+                    label: "Специальные возможности",
+                    url: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+                )
+                PermissionRow(
+                    granted: micGranted,
+                    label: "Микрофон",
+                    url: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+                )
             }
 
-            Section {
-                LabeledContent {
+            SettingsSection {
+                SettingsRow("О программе", subtitle: "Версия, автор, приватность, лицензии") {
                     Button("Открыть…") { showAbout = true }
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("О программе")
-                        Text("Версия, автор, приватность, лицензии")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
                 }
             }
         }
-        .formStyle(.grouped)
-        .onTapGesture { NSApp.keyWindow?.makeFirstResponder(nil) }
-        .sheet(isPresented: $showAbout) { aboutSheet }
     }
 
     // MARK: - Таб «LLM»
 
     private var llmTab: some View {
-        Form {
-            Section {
+        SettingsPage {
+            SettingsSection {
                 Toggle(isOn: $llmEnabled) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Улучшать текст после распознавания")
-                        Text("Убирает паразиты, расставляет знаки препинания, исправляет термины")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
+                    RowLabel(
+                        title: "Улучшать текст после распознавания",
+                        subtitle: "Убирает паразиты, расставляет знаки препинания, исправляет термины"
+                    )
                 }
                 .onChange(of: llmEnabled) { LLMSettings.isEnabled = $0 }
             }
 
             if llmEnabled {
-                Section("Подключение") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Провайдер").font(.caption).foregroundStyle(.secondary)
+                SettingsSection("Подключение") {
+                    SettingsRow("Провайдер") {
                         Picker("", selection: $llmProvider) {
                             ForEach(LLMProvider.allCases, id: \.self) { Text($0.label).tag($0) }
                         }
-                        .labelsHidden().pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(width: 176)
                         .onChange(of: llmProvider) { v in
                             LLMSettings.provider = v
-                            llmURL = LLMSettings.serverURL; llmKey = LLMSettings.apiKey
-                            llmModel = LLMSettings.model; llmModels = []; llmError = nil
+                            llmURL = LLMSettings.serverURL
+                            llmKey = LLMSettings.apiKey
+                            llmModel = LLMSettings.model
+                            llmModels = []
+                            llmError = nil
                         }
                     }
 
-                    LabeledContent("Сервер") {
-                        HStack(spacing: 4) {
+                    SettingsRow("Сервер") {
+                        HStack(spacing: 6) {
                             TextField("", text: $llmURL)
                                 .textFieldStyle(.roundedBorder)
-                                .onChange(of: llmURL) { v in LLMSettings.serverURL = v; llmModels = []; llmError = nil }
+                                .frame(width: 220)
+                                .onChange(of: llmURL) { v in
+                                    LLMSettings.serverURL = v
+                                    llmModels = []
+                                    llmError = nil
+                                }
                             if llmURL != llmProvider.defaultURL {
                                 Button {
-                                    llmURL = llmProvider.defaultURL; LLMSettings.serverURL = llmURL
+                                    llmURL = llmProvider.defaultURL
+                                    LLMSettings.serverURL = llmURL
                                 } label: {
-                                    Image(systemName: "arrow.counterclockwise").font(.system(size: 11))
+                                    Image(systemName: "arrow.counterclockwise")
+                                        .font(.system(size: 11))
                                 }
-                                .buttonStyle(.borderless).foregroundStyle(.secondary)
+                                .buttonStyle(.borderless)
+                                .foregroundStyle(.secondary)
                                 .help("Сбросить к значению по умолчанию")
                             }
                         }
                     }
 
-                    LabeledContent("API ключ") {
+                    SettingsRow("API ключ") {
                         SecureField("", text: $llmKey)
                             .textFieldStyle(.roundedBorder)
+                            .frame(width: 220)
                             .onChange(of: llmKey) { LLMSettings.apiKey = $0 }
                     }
 
-                    LabeledContent("Модель") {
+                    SettingsRow("Модель") {
                         HStack(spacing: 6) {
                             if llmModels.isEmpty {
                                 Text(llmModel.isEmpty ? "–" : llmModel)
                                     .foregroundStyle(llmModel.isEmpty ? .secondary : .primary)
-                                Spacer(minLength: 0)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .frame(width: 174, alignment: .trailing)
                             } else {
                                 Picker("", selection: $llmModel) {
                                     ForEach(llmModels, id: \.self) { Text($0).tag($0) }
                                 }
                                 .labelsHidden()
-                                .onChange(of: llmModel) { v in guard !v.isEmpty else { return }; LLMSettings.model = v }
+                                .frame(width: 174)
+                                .onChange(of: llmModel) { v in
+                                    guard !v.isEmpty else { return }
+                                    LLMSettings.model = v
+                                }
                             }
                             Button { loadModels() } label: {
                                 Image(systemName: llmLoading ? "ellipsis" : "arrow.clockwise")
                                     .font(.system(size: 12))
                             }
-                            .buttonStyle(.borderless).disabled(llmLoading || llmURL.isEmpty)
+                            .buttonStyle(.borderless)
+                            .disabled(llmLoading || llmURL.isEmpty)
                         }
                     }
-                    if let err = llmError { Text(err).font(.caption).foregroundStyle(.red) }
+
+                    if let err = llmError {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
 
-                Section("Параметры") {
-                    LabeledContent {
+                SettingsSection("Параметры") {
+                    SettingsRow("Минимальная длина", subtitle: "Текст короче не отправляется на обработку") {
                         Stepper("\(llmMinLength) симв.", value: $llmMinLength, in: 10...500, step: 10)
+                            .frame(width: 128, alignment: .trailing)
                             .onChange(of: llmMinLength) { LLMSettings.minLength = max(10, $0) }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Минимальная длина")
-                            Text("Текст короче не отправляется на обработку")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
                     }
 
                     Toggle("Использовать прокси", isOn: $llmProxyEnabled)
                         .onChange(of: llmProxyEnabled) { LLMSettings.proxyEnabled = $0 }
                     if llmProxyEnabled {
-                        LabeledContent("Прокси") {
+                        SettingsRow("Прокси") {
                             TextField("", text: $llmProxyURL)
                                 .textFieldStyle(.roundedBorder)
+                                .frame(width: 220)
                                 .onChange(of: llmProxyURL) { LLMSettings.proxyURL = $0 }
                         }
                     }
                 }
 
-                Section("Системный промпт") {
+                SettingsSection("Системный промпт") {
                     TextEditor(text: $llmPrompt)
                         .font(.system(.caption, design: .monospaced))
                         .frame(height: 90)
                         .scrollContentBackground(.hidden)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5)
+                                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                        )
                         .onChange(of: llmPrompt) { LLMSettings.systemPrompt = $0 }
                     HStack {
                         Button("Сбросить") {
                             llmPrompt = LLMCorrector.defaultPrompt
                             LLMSettings.systemPrompt = llmPrompt
                         }
-                        .buttonStyle(.borderless).foregroundStyle(.red).font(.caption)
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.red)
+                        .font(.caption)
                         Spacer()
-                        Text("\(llmPrompt.count) симв.").font(.caption).foregroundStyle(.quaternary)
+                        Text("\(llmPrompt.count) симв.")
+                            .font(.caption)
+                            .foregroundStyle(.quaternary)
                     }
                 }
             }
         }
-        .formStyle(.grouped)
-        .onTapGesture { NSApp.keyWindow?.makeFirstResponder(nil) }
     }
 
     // MARK: - «О программе» (sheet из «Основных»)
@@ -320,79 +362,64 @@ struct SettingsView: View {
                 Button("Закрыть") { showAbout = false }
                     .keyboardShortcut(.cancelAction)
             }
-            .padding(.horizontal, 16).padding(.vertical, 12)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
             Divider()
             aboutTab
         }
         .frame(width: 440, height: 470)
+        .sheet(isPresented: $showLicenses) { LicensesView() }
     }
 
     private var aboutTab: some View {
-        Form {
-            Section {
+        SettingsPage {
+            SettingsSection {
                 HStack(spacing: 12) {
                     Image(nsImage: NSApp.applicationIconImage)
-                        .resizable().frame(width: 48, height: 48)
+                        .resizable()
+                        .frame(width: 48, height: 48)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Говорун").font(.headline)
                         Text("Версия \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                         Text("GigaAM v3 · Silero VAD · sherpa-onnx")
-                            .font(.caption).foregroundStyle(.tertiary)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
                     }
                 }
                 .padding(.vertical, 4)
             }
 
-            Section("Автор") {
-                LabeledContent("Дмитрий Киселев") {
+            SettingsSection("Автор") {
+                SettingsRow("Дмитрий Киселев") {
                     Link("@amidexe", destination: URL(string: "https://github.com/amidexe")!)
                         .foregroundStyle(.secondary)
                 }
-                LabeledContent("Исходный код") {
+                SettingsRow("Исходный код") {
                     Link("GitHub", destination: URL(string: "https://github.com/amidexe/govorun-osx")!)
                         .foregroundStyle(.secondary)
                 }
             }
 
-            Section("Приватность") {
-                LabeledContent {
+            SettingsSection("Приватность") {
+                SettingsRow("Распознавание речи", subtitle: "Звук не покидает устройство") {
                     Text("Офлайн").foregroundStyle(.secondary)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("🔒  Распознавание речи")
-                        Text("Звук не покидает устройство")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
                 }
-                LabeledContent {
+                SettingsRow("LLM-стилизация", subtitle: "Только к серверу, который вы сами указали") {
                     Text("Если включено").foregroundStyle(.secondary)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("🌐  LLM-стилизация")
-                        Text("Только к серверу, который вы сами указали")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
                 }
-                LabeledContent {
+                SettingsRow("API-ключи", subtitle: "Хранятся в системной цепочке ключей macOS") {
                     Text("Keychain").foregroundStyle(.secondary)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("🔑  API-ключи")
-                        Text("Хранятся в системной цепочке ключей macOS")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
                 }
             }
 
-            Section {
-                LabeledContent("Лицензии компонентов") {
+            SettingsSection {
+                SettingsRow("Лицензии компонентов") {
                     Button("Открыть…") { showLicenses = true }
                 }
             }
-            .sheet(isPresented: $showLicenses) { LicensesView() }
         }
-        .formStyle(.grouped)
     }
 
     // MARK: - Helpers
@@ -404,31 +431,185 @@ struct SettingsView: View {
         case .long:   return "2 с"
         }
     }
+
     private var maxRecLabel: String {
         maxRecMinutes == 0 ? "∞ без лимита" : "\(maxRecMinutes) мин"
     }
+
+    private var yellowRange: ClosedRange<Int> {
+        5...max(5, warningRed - 5)
+    }
+
+    private var redRange: ClosedRange<Int> {
+        min(max(warningYellow + 5, 10), 600)...600
+    }
+
     private func incrementPause() {
-        guard pauseLength != .long   else { return }
+        guard pauseLength != .long else { return }
         pauseLength = pauseLength == .short ? .medium : .long
         PauseLength.stored = pauseLength
     }
+
     private func decrementPause() {
-        guard pauseLength != .short  else { return }
+        guard pauseLength != .short else { return }
         pauseLength = pauseLength == .long ? .medium : .short
         PauseLength.stored = pauseLength
     }
+
     private func loadModels() {
-        llmLoading = true; llmError = nil
+        llmLoading = true
+        llmError = nil
         let snap = llmProvider
         Task {
             do {
                 let models = try await LLMCorrector.shared.fetchModels()
-                guard llmProvider == snap else { llmLoading = false; return }
+                guard llmProvider == snap else {
+                    llmLoading = false
+                    return
+                }
                 llmModels = models
-                if llmModel.isEmpty || !models.contains(llmModel) { llmModel = models.first ?? "" }
+                if llmModel.isEmpty || !models.contains(llmModel) {
+                    llmModel = models.first ?? ""
+                }
                 LLMSettings.model = llmModel
-            } catch { llmError = "Не удалось подключиться к серверу" }
+            } catch {
+                llmError = "Не удалось подключиться к серверу"
+            }
             llmLoading = false
+        }
+    }
+}
+
+// MARK: - Stable settings layout
+
+private struct SettingsTabBar: View {
+    @Binding var selection: SettingsTab
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(SettingsTab.allCases) { tab in
+                Button {
+                    selection = tab
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: tab.systemImage)
+                        Text(tab.title)
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(selection == tab ? Color.accentColor : Color.primary)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(selection == tab ? Color.accentColor.opacity(0.16) : Color.clear)
+                )
+            }
+        }
+        .padding(3)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(NSColor.windowBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+        )
+    }
+}
+
+private struct SettingsPage<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                content
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+}
+
+private struct SettingsSection<Content: View>: View {
+    let title: String?
+    let content: Content
+
+    init(_ title: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let title {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                    .padding(.horizontal, 2)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                content
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(NSColor.controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct SettingsRow<Content: View>: View {
+    let title: String
+    let subtitle: String?
+    let content: Content
+
+    init(_ title: String, subtitle: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            RowLabel(title: title, subtitle: subtitle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            content
+        }
+        .frame(minHeight: 28)
+    }
+}
+
+private struct RowLabel: View {
+    let title: String
+    let subtitle: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }
