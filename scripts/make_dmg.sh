@@ -1,10 +1,11 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # Имя .app — кириллицей (CFBundleName), но имя DMG-файла — ASCII:
 # GitHub Releases не принимает не-ASCII имена ассетов и молча заменяет их на default.dmg.
-APP=".build/Build/Products/Debug/Говорун.app"
-DMG="govorun.dmg"
+CONFIGURATION="${GOVORUN_DMG_CONFIGURATION:-${CONFIGURATION:-Release}}"
+APP="${GOVORUN_DMG_APP:-.build/Build/Products/${CONFIGURATION}/Говорун.app}"
+DMG="${GOVORUN_DMG_OUTPUT:-dist/govorun.dmg}"
 STAGING="/tmp/govorun_dmg_stage"
 VOLUME="Говорун"
 
@@ -16,9 +17,10 @@ fi
 echo "==> Подготавливаю DMG..."
 rm -rf "$STAGING"
 mkdir -p "$STAGING"
-cp -R "$APP" "$STAGING/"
+/usr/bin/ditto "$APP" "$STAGING/Говорун.app"
 ln -s /Applications "$STAGING/Applications"
 
+mkdir -p "$(dirname "$DMG")"
 rm -f "$DMG"
 hdiutil create \
     -volname "$VOLUME" \

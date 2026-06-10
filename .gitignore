@@ -19,6 +19,9 @@ Govorun/Resources/Model/
 
 # Дистрибутив (выкладывается через GitHub Releases, не в репозиторий)
 *.dmg
+*.zip
+dist/
+docs/preview/
 
 # Временные файлы
 *.orig

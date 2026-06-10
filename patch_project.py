@@ -56,7 +56,7 @@ def patch():
         new_fr += (
             f'\t\t{ASSETS_FILE_REF} /* Assets.xcassets */ = '
             f'{{isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; '
-            f'path = Assets.xcassets; sourceTree = "<group>"; }};\n'
+            f'path = Govorun/Assets.xcassets; sourceTree = "<group>"; }};\n'
         )
     if model_ref_marker not in c:
         new_fr += (
@@ -67,6 +67,11 @@ def patch():
     if new_fr:
         c = c.replace("/* End PBXFileReference section */",
                       new_fr + "\t\t/* End PBXFileReference section */")
+
+    c = c.replace(
+        f'{ASSETS_FILE_REF} /* Assets.xcassets */ = {{isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; }};',
+        f'{ASSETS_FILE_REF} /* Assets.xcassets */ = {{isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Govorun/Assets.xcassets; sourceTree = "<group>"; }};'
+    )
 
     # ── 3. PBXShellScriptBuildPhase — copies sherpa headers/lib ────────────
     if SETUP_SCRIPT_PHASE not in c:
