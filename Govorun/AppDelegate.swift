@@ -300,7 +300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startRecording() async {
         hotkeyManager.isRecording = true
         floatingWindowController?.show()
-        RecordingSound.playStart()       // до приглушения, чтобы было слышно
+        RecordingSound.playStart()       // mute внутри muter отложен, чтобы стартовый звук не обрезался
         audioMuter.muteIfNeeded()
         do {
             try await audioEngine.startRecording()
