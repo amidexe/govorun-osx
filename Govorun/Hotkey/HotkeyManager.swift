@@ -17,6 +17,7 @@ final class HotkeyManager {
     nonisolated(unsafe) private var cfg:           HotkeyConfig = HotkeyConfig.stored
     nonisolated(unsafe) private var cancelCfg:     HotkeyConfig = HotkeyConfig.cancelStored ?? HotkeyConfig.defaultCancel
     nonisolated(unsafe) private var modifierIsDown = false
+    nonisolated(unsafe) private var ignoreEventsUntil: UInt64 = 0
     // True, пока проглочен keyDown нашего хоткея-клавиши и ещё не пришёл парный keyUp.
     // Гарантирует симметрию: keyUp глотаем ТОЛЬКО если проглотили его keyDown.
     // Иначе ОС увидит нажатие, но не увидит отпускания → клавиша «залипнет»
@@ -56,6 +57,7 @@ final class HotkeyManager {
         CGEvent.tapEnable(tap: tap, enable: true)
         eventTap = tap
         runLoopSource = src
+        armAfterTapChange(seconds: 1.0)
         logger.info("HotkeyManager started: \(self.cfg.displayString)")
     }
 
@@ -79,6 +81,7 @@ final class HotkeyManager {
     func resumeAfterRecorder() {
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
         modifierIsDown = false
+        armAfterTapChange(seconds: 0.3)
         // keyHotkeyDown НЕ сбрасываем здесь: если клавиша ещё зажата, тап
         // продолжит глотать автоповтор. Флаг обнулится сам, когда придёт keyUp.
     }
@@ -87,7 +90,16 @@ final class HotkeyManager {
 
     nonisolated private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
+            if let tap = eventTap {
+                CGEvent.tapEnable(tap: tap, enable: true)
+                armAfterTapChange(seconds: 1.0)
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
+        if DispatchTime.now().uptimeNanoseconds < ignoreEventsUntil {
+            modifierIsDown = false
+            keyHotkeyDown = false
             return Unmanaged.passUnretained(event)
         }
 
@@ -175,5 +187,10 @@ final class HotkeyManager {
             // зависнет в ОС и последующий ввод станет непредсказуемым.
             return Unmanaged.passUnretained(event)
         }
+    }
+
+    nonisolated private func armAfterTapChange(seconds: Double) {
+        let nanos = UInt64(seconds * 1_000_000_000)
+        ignoreEventsUntil = DispatchTime.now().uptimeNanoseconds + nanos
     }
 }

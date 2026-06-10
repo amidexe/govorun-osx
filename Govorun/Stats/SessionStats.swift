@@ -28,7 +28,8 @@ enum SessionStats {
     // MARK: - Daily history (источник для «сегодня», «вчера», графика)
 
     private static let historyKey  = "statsDailyHistory"
-    private static let historyDays  = 60   // сколько дней храним
+    static let historyRetentionDays = 60
+    private static let historyDays = historyRetentionDays
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter()
@@ -84,6 +85,20 @@ enum SessionStats {
         let today = cal.startOfDay(for: Date())
         return (0..<n).reversed().map { offset in
             let day = cal.date(byAdding: .day, value: -offset, to: today) ?? today
+            return (day, hist[key(for: day)] ?? DayStat())
+        }
+    }
+
+    /// Текущий календарный месяц: с 1-го числа по сегодня, старые → новые.
+    static func currentMonthDays() -> [(date: Date, stat: DayStat)] {
+        let hist = loadHistory()
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let start = cal.dateInterval(of: .month, for: today)?.start ?? today
+        let dayCount = (cal.dateComponents([.day], from: start, to: today).day ?? 0) + 1
+
+        return (0..<dayCount).map { offset in
+            let day = cal.date(byAdding: .day, value: offset, to: start) ?? start
             return (day, hist[key(for: day)] ?? DayStat())
         }
     }

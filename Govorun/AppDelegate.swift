@@ -58,8 +58,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LLMSettings.migrateKeysToKeychain()
         setupMenuBar()
         floatingWindowController = FloatingWindowController()
-        requestPermissionsAndSetupHotkey()
+        if !disableHotkeyForSmokeTest {
+            requestPermissionsAndSetupHotkey()
+        }
         openSettingsForSmokeTestIfNeeded()
+    }
+
+    private var disableHotkeyForSmokeTest: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["GOVORUN_DISABLE_HOTKEY_ON_LAUNCH"] == "1"
+        #else
+        false
+        #endif
     }
 
     private func openSettingsForSmokeTestIfNeeded() {
@@ -142,7 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             let p = NSPopover()
             p.contentViewController = vc
-            p.contentSize = NSSize(width: 220, height: 100)
+            p.contentSize = NSSize(width: 236, height: 116)
             p.behavior = .transient
             statsPopover = p
         }
@@ -166,7 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             let p = NSPopover()
             p.contentViewController = vc
-            p.contentSize = NSSize(width: 220, height: 100)
+            p.contentSize = NSSize(width: 236, height: 116)
             p.behavior = .transient
             statsPopover = p
         }

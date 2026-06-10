@@ -18,6 +18,7 @@ PID=""
 
 cleanup() {
     launchctl unsetenv GOVORUN_OPEN_SETTINGS_ON_LAUNCH >/dev/null 2>&1 || true
+    launchctl unsetenv GOVORUN_DISABLE_HOTKEY_ON_LAUNCH >/dev/null 2>&1 || true
     if [[ -n "$PID" ]] && kill -0 "$PID" >/dev/null 2>&1; then
         kill "$PID" >/dev/null 2>&1 || true
         wait "$PID" >/dev/null 2>&1 || true
@@ -29,6 +30,7 @@ pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 sleep 1
 
 launchctl setenv GOVORUN_OPEN_SETTINGS_ON_LAUNCH 1
+launchctl setenv GOVORUN_DISABLE_HOTKEY_ON_LAUNCH 1
 open -n "$APP"
 
 for _ in {1..60}; do
@@ -39,6 +41,7 @@ for _ in {1..60}; do
     sleep 0.25
 done
 launchctl unsetenv GOVORUN_OPEN_SETTINGS_ON_LAUNCH >/dev/null 2>&1 || true
+launchctl unsetenv GOVORUN_DISABLE_HOTKEY_ON_LAUNCH >/dev/null 2>&1 || true
 
 if [[ -z "$PID" ]]; then
     echo "Говорун did not start" >&2

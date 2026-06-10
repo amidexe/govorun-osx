@@ -11,7 +11,7 @@ struct MetricCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(color.opacity(0.15))
                     Image(systemName: icon)
                         .resizable()
@@ -28,7 +28,8 @@ struct MetricCard: View {
             }
 
             Text(value)
-                .font(.system(size: 24, weight: .black, design: .rounded))
+                .font(.system(size: 22, weight: .semibold, design: .rounded))
+                .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
 
@@ -40,10 +41,14 @@ struct MetricCard: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(16)
+        .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.thinMaterial)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(NSColor.controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
         )
     }
 }

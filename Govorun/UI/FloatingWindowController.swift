@@ -5,6 +5,7 @@ import SwiftUI
 final class FloatingWindowController: NSWindowController {
 
     private let visibility = RecorderVisibility()
+    private var didInstallContent = false
 
     convenience init() {
         let s = FloatingRecorderView.size
@@ -24,17 +25,11 @@ final class FloatingWindowController: NSWindowController {
 
         self.init(window: panel)
 
-        let view = FloatingRecorderView(visibility: visibility)
-        let hosting = NSHostingView(rootView: view)
-        hosting.autoresizingMask = [.width, .height]
-        hosting.wantsLayer = true
-        hosting.layer?.backgroundColor = .clear
-        panel.contentView = hosting
-
         positionPanel()
     }
 
     func show() {
+        installContentIfNeeded()
         NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
         visibility.isActive = true          // запускает pulse-анимацию
         positionPanel()
@@ -51,8 +46,10 @@ final class FloatingWindowController: NSWindowController {
             ctx.duration = 0.2
             window?.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
-            self?.window?.orderOut(nil)
-            self?.visibility.isActive = false   // останавливает pulse — нет фоновой нагрузки
+            Task { @MainActor in
+                self?.window?.orderOut(nil)
+                self?.visibility.isActive = false   // останавливает pulse — нет фоновой нагрузки
+            }
         })
     }
 
@@ -63,5 +60,16 @@ final class FloatingWindowController: NSWindowController {
         let x = frame.midX - wSize.width / 2
         let y = frame.minY + 24
         w.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    private func installContentIfNeeded() {
+        guard !didInstallContent, let panel = window else { return }
+        let view = FloatingRecorderView(visibility: visibility)
+        let hosting = NSHostingView(rootView: view)
+        hosting.autoresizingMask = [.width, .height]
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = .clear
+        panel.contentView = hosting
+        didInstallContent = true
     }
 }

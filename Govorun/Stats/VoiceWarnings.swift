@@ -22,7 +22,7 @@ enum WarningSettings {
 
     static func zone(minutes: Int) -> WarningZone {
         guard isEnabled else { return .green }
-        if minutes >= redMinutes    { return .red }
+        if minutes >= redMinutes { return .red }
         if minutes >= yellowMinutes { return .yellow }
         return .green
     }
@@ -33,71 +33,110 @@ enum WarningSettings {
 struct VoiceZonesInfoView: View {
     @Environment(\.dismiss) var dismiss
     @State private var yellow: Int = WarningSettings.yellowMinutes
-    @State private var red:    Int = WarningSettings.redMinutes
+    @State private var red: Int = WarningSettings.redMinutes
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Голосовые зоны").font(.headline)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: "waveform.path.ecg")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.18, green: 0.42, blue: 0.92))
+                    .frame(width: 28, height: 28)
+                    .background(Color(red: 0.18, green: 0.42, blue: 0.92).opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Зоны нагрузки")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Ориентир по суммарному времени речи за день")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
-                Button("Закрыть") { dismiss() }
-                    .buttonStyle(.borderless).keyboardShortcut(.cancelAction)
-            }
-            Text("Усталость голоса и внимания накапливается от времени речи за день, а не от числа диктовок. Зоны считают суммарные минуты речи.")
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("🟢  до \(yellow) мин — продуктивная зона, голос и внимание свежие")
-                Text("🟡  \(yellow)–\(red) мин — накапливается усталость, формулировки хуже")
-                Text("🔴  \(red)+ мин — нужен перерыв, голос и рабочая память перегружены")
+                .keyboardShortcut(.cancelAction)
             }
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            Text("Пороги — ваши настройки. Наука задаёт принцип, цифры подбирайте под свой темп.")
-                .font(.caption).foregroundStyle(.tertiary)
+
+            Text("Усталость и внимание зависят от времени речи за день, а не от числа диктовок. Зоны помогают заметить момент, когда лучше сделать паузу.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: 8) {
+                ZoneInfoRow(
+                    color: Color(red: 0.18, green: 0.56, blue: 0.34),
+                    title: "Норма",
+                    range: "до \(yellow) мин",
+                    detail: "Комфортная зона: силы и внимание остаются свежими."
+                )
+                ZoneInfoRow(
+                    color: Color(red: 0.82, green: 0.48, blue: 0.10),
+                    title: "Пора на паузу",
+                    range: "\(yellow)-\(red) мин",
+                    detail: "Усталость копится, формулировки начинают даваться тяжелее."
+                )
+                ZoneInfoRow(
+                    color: Color(red: 0.82, green: 0.18, blue: 0.20),
+                    title: "Нужен отдых",
+                    range: "\(red)+ мин",
+                    detail: "Рабочая память перегружена, лучше восстановиться перед новой диктовкой."
+                )
+            }
+
+            Text("Пороги остаются вашими настройками: принцип общий, цифры лучше подобрать под собственный темп.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
         }
         .padding(16)
-        .frame(width: 360)
+        .frame(width: 380)
         .onAppear {
             yellow = WarningSettings.yellowMinutes
-            red    = WarningSettings.redMinutes
+            red = WarningSettings.redMinutes
         }
     }
 }
 
-private struct ZoneCard: View {
-    let color:    Color
-    let icon:     String
-    let title:    String
-    let subtitle: String
-    let detail:   String
+private struct ZoneInfoRow: View {
+    let color: Color
+    let title: String
+    let range: String
+    let detail: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            Rectangle()
+        HStack(alignment: .top, spacing: 10) {
+            Circle()
                 .fill(color)
-                .frame(width: 4)
-                .cornerRadius(2)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(icon)
-                    Text(title).font(.headline)
-                    Spacer()
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(color.opacity(0.12))
-                        .cornerRadius(4)
+                .frame(width: 8, height: 8)
+                .padding(.top, 6)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(range)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(color)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(color.opacity(0.12), in: Capsule())
+                    Spacer(minLength: 0)
                 }
                 Text(detail)
-                    .font(.callout)
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(12)
         }
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.25), lineWidth: 1))
+        .padding(10)
+        .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(color.opacity(0.18), lineWidth: 1)
+        )
     }
 }

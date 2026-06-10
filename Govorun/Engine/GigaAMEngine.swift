@@ -20,7 +20,7 @@ enum GigaAMError: LocalizedError {
     }
 }
 
-final class GigaAMEngine {
+final class GigaAMEngine: @unchecked Sendable {
     private var recognizer: OpaquePointer?
     // Serial queue владеет recognizer: гарантирует, что выгрузка никогда не
     // случится во время декодирования (всё — load/unload/decode — на ней).

@@ -24,7 +24,6 @@ final class ZoneTransitionWindowController: NSWindowController {
     }
 
     func showZone(_ zone: WarningZone) {
-        NSLog("[Zone] showZone called: %@", "\(zone)")
         dismissTask?.cancel()
 
         let color: Color = zone == .red ? .red : .orange
@@ -45,7 +44,7 @@ final class ZoneTransitionWindowController: NSWindowController {
         dismissTask = Task {
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled else { return }
-            await dismiss()
+            dismiss()
         }
     }
 

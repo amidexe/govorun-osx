@@ -87,13 +87,15 @@ final class AudioEngine: ObservableObject {
         // Feed remaining + flush VAD to get final segment
         if let vad {
             var leftovers = windowBuf + remaining
-            // Feed full windows
-            while leftovers.count >= SileroVAD.windowSize {
-                let win = Array(leftovers.prefix(SileroVAD.windowSize))
-                leftovers.removeFirst(SileroVAD.windowSize)
+            var offset = 0
+            while leftovers.count - offset >= SileroVAD.windowSize {
+                let end = offset + SileroVAD.windowSize
+                let win = Array(leftovers[offset..<end])
+                offset = end
                 let segs = vad.accept(win)
                 for s in segs where s.count > 1600 { scheduleChunk(s) }
             }
+            if offset > 0 { leftovers.removeFirst(offset) }
             // Flush for final segment
             let finalSegs = vad.flushAndDrain()
             for s in finalSegs where s.count > 1600 { scheduleChunk(s) }
@@ -176,7 +178,7 @@ final class AudioEngine: ObservableObject {
 
     private func startLevelTimer() {
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(32))
+        timer.schedule(deadline: .now(), repeating: .milliseconds(64))
         timer.setEventHandler { [weak self] in
             guard let self, let rec = self.recorder else { return }
 
@@ -192,14 +194,17 @@ final class AudioEngine: ObservableObject {
             guard !newSamples.isEmpty else { return }
 
             self.windowBuf.append(contentsOf: newSamples)
-            while self.windowBuf.count >= SileroVAD.windowSize {
-                let win = Array(self.windowBuf.prefix(SileroVAD.windowSize))
-                self.windowBuf.removeFirst(SileroVAD.windowSize)
+            var offset = 0
+            while self.windowBuf.count - offset >= SileroVAD.windowSize {
+                let end = offset + SileroVAD.windowSize
+                let win = Array(self.windowBuf[offset..<end])
+                offset = end
                 let segs = vad.accept(win)
                 for seg in segs where seg.count > 1600 {
                     self.scheduleChunk(seg)
                 }
             }
+            if offset > 0 { self.windowBuf.removeFirst(offset) }
         }
         timer.resume()
         levelTimer = timer
