@@ -36,49 +36,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var statusItem: NSStatusItem!
     private var permissionCheckTimer: Timer?
+    private var permissionStatusTimer: Timer?
+    private var lastPermissionAttentionState: Bool?
 
     private enum RecordingState {
         case idle
         case recording(startedAt: Date)
-        case toggleMode
+        case toggleMode(startedAt: Date)
     }
     private var recordingState: RecordingState = .idle
     private let pttThreshold: TimeInterval = 0.35
-    // Single-flight: пока идёт завершение записи + вставка, повторный вход запрещён.
-    // Защищает от любой петли/наложения, которая могла бы спамить вставку.
-    private var isFinishing = false
+    // Защищает только короткий момент остановки аудиосессии. Распознавание и
+    // вставка идут отдельно, чтобы следующую фразу можно было начать сразу.
+    private var isStoppingRecording = false
+    private var recognitionTail: Task<Void, Never>?
+    private var queuedRecognitionJobs = 0
     // Автостоп по лимиту длительности записи (RecordingOptions.maxRecordingMinutes).
     private var maxDurationTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        KeychainSelfTest.runIfRequested()
+        OpenAIProxySelfTest.runIfRequested()
         NSApp.setActivationPolicy(.accessory)
         // Сторож главного потока: если UI зависнет (напр. layout-loop SwiftUI),
         // приложение самозавершится, а не будет жечь CPU/батарею часами.
         MainThreadWatchdog.shared.start()
-        LLMSettings.migrateKeysToKeychain()
+        RuntimeState.setBusy(false)
+        DiagnosticsLog.record("Приложение запущено.", category: "Приложение")
+        refreshLLMConfigurationStatus()
         setupMenuBar()
+        startPermissionStatusTimer()
         floatingWindowController = FloatingWindowController()
         if !disableHotkeyForSmokeTest {
-            requestPermissionsAndSetupHotkey()
+            setupHotkeyIfTrusted()
         }
         openSettingsForSmokeTestIfNeeded()
     }
 
     private var disableHotkeyForSmokeTest: Bool {
-        #if DEBUG
         ProcessInfo.processInfo.environment["GOVORUN_DISABLE_HOTKEY_ON_LAUNCH"] == "1"
-        #else
-        false
-        #endif
     }
 
     private func openSettingsForSmokeTestIfNeeded() {
-        #if DEBUG
         guard ProcessInfo.processInfo.environment["GOVORUN_OPEN_SETTINGS_ON_LAUNCH"] == "1" else { return }
         DispatchQueue.main.async { [weak self] in
             self?.openSettings()
         }
-        #endif
     }
 
     // MARK: - Menu bar
@@ -86,20 +89,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let btn = statusItem.button!
-        btn.image = NSImage.birdTemplate(size: 20)
         btn.target = self
         btn.action = #selector(handleStatusBarClick)
         btn.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        refreshStatusIcon(force: true)
     }
 
     @objc private func handleStatusBarClick() {
         let event = NSApp.currentEvent
         if event?.type == .rightMouseUp {
             showContextMenu()
-            return
-        }
-        if isRecordingActive {
-            Task { @MainActor in await self.finishRecording() }
             return
         }
         if let p = statsPopover, p.isShown {
@@ -110,32 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showContextMenu() {
-        let axOk  = AXIsProcessTrusted()
-        let micOk = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         let menu  = NSMenu()
-
-        if !axOk {
-            let item = NSMenuItem(title: "⚠️ Выдать права Accessibility…", action: #selector(openAccessibilitySettings), keyEquivalent: "")
-            item.target = self
-            menu.addItem(item)
-        }
-        if !micOk {
-            let item = NSMenuItem(title: "⚠️ Выдать права Микрофон…", action: #selector(openMicSettings), keyEquivalent: "")
-            item.target = self
-            menu.addItem(item)
-        }
-        if !axOk || !micOk { menu.addItem(.separator()) }
-
-        if isRecordingActive {
-            let stopItem = NSMenuItem(title: "Остановить запись", action: #selector(stopRecordingFromMenu), keyEquivalent: "")
-            stopItem.target = self
-            menu.addItem(stopItem)
-
-            let cancelItem = NSMenuItem(title: "Отменить запись", action: #selector(cancelRecordingFromMenu), keyEquivalent: "")
-            cancelItem.target = self
-            menu.addItem(cancelItem)
-            menu.addItem(.separator())
-        }
 
         let settingsItem = NSMenuItem(title: "Настройки…", action: #selector(openSettings), keyEquivalent: "")
         settingsItem.target = self
@@ -151,6 +125,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
+    }
+
+    private var missingPermissionNames: [String] {
+        var names: [String] = []
+        if !AXIsProcessTrusted() {
+            names.append("Специальные возможности")
+        }
+        if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
+            names.append("Микрофон")
+        }
+        return names
+    }
+
+    private var requiredPermissionsGranted: Bool {
+        missingPermissionNames.isEmpty
+    }
+
+    private func refreshStatusIcon(force: Bool = false) {
+        let missing = missingPermissionNames
+        let needsAttention = !missing.isEmpty
+        guard force || lastPermissionAttentionState != needsAttention else { return }
+        lastPermissionAttentionState = needsAttention
+        statusItem.button?.image = NSImage.birdStatus(size: 20, needsAttention: needsAttention)
+        statusItem.button?.toolTip = needsAttention ? "Говорун: нужны разрешения" : "Говорун"
+        if needsAttention {
+            DiagnosticsLog.record(
+                "Нужны разрешения: \(missing.joined(separator: ", ")).",
+                category: "Разрешения",
+                level: .warning
+            )
+        } else {
+            DiagnosticsLog.record("Разрешения включены.", category: "Разрешения")
+        }
+    }
+
+    private func startPermissionStatusTimer() {
+        permissionStatusTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshStatusIcon()
+            }
+        }
+        permissionStatusTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     // MARK: - Windows
@@ -209,16 +227,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.buttons[0].hasDestructiveAction = true
         if alert.runModal() == .alertFirstButtonReturn {
             SessionStats.resetToday()
+            DiagnosticsLog.record("Статистика за сегодня сброшена.", category: "Статистика")
             NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
         }
-    }
-
-    @objc private func stopRecordingFromMenu() {
-        Task { @MainActor in await self.finishRecording() }
-    }
-
-    @objc private func cancelRecordingFromMenu() {
-        Task { @MainActor in await self.abortRecording() }
     }
 
     @objc func openSettings() {
@@ -254,31 +265,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
     }
 
-    private func requestPermissionsAndSetupHotkey() {
-        // Request mic
-        AVCaptureDevice.requestAccess(for: .audio) { _ in }
-
-        // Try to start hotkey; if no accessibility, prompt
-        setupHotkey()
-
-        if !AXIsProcessTrusted() {
-            let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            AXIsProcessTrustedWithOptions(opts)
+    private func setupHotkeyIfTrusted() {
+        guard AXIsProcessTrusted() else {
+            DiagnosticsLog.record(
+                "Ожидаю доступ к специальным возможностям для хоткея.",
+                category: "Разрешения",
+                level: .warning
+            )
             startPermissionCheckTimer()
+            return
         }
+        setupHotkey()
     }
 
-    // Poll until accessibility granted, then restart hotkey
+    // Poll until accessibility is available, then restart hotkey without prompting.
     private func startPermissionCheckTimer() {
         permissionCheckTimer?.invalidate()
         permissionCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] t in
             Task { @MainActor [weak self] in
                 guard let self else { t.invalidate(); return }
-                if AXIsProcessTrusted() {
+                guard AXIsProcessTrusted() else { return }
+                if !self.hotkeyManager.isActive {
+                    self.hotkeyManager.stop()
+                    self.hotkeyManager.reloadConfig()
+                    self.setupHotkey()
+                }
+                if self.hotkeyManager.isActive {
+                    DiagnosticsLog.record("Хоткей запущен после выдачи доступа.", category: "Хоткей")
                     t.invalidate()
                     self.permissionCheckTimer = nil
-                    self.hotkeyManager.stop()
-                    self.setupHotkey()
                 }
             }
         }
@@ -289,7 +304,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func restartHotkey() {
         hotkeyManager.stop()
         hotkeyManager.reloadConfig()
-        setupHotkey()
+        setupHotkeyIfTrusted()
+    }
+
+    @objc private func restartHotkeyFromMenu() {
+        restartHotkey()
     }
 
     private func setupHotkey() {
@@ -305,13 +324,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyManager.onCancel = { [weak self] in
             Task { @MainActor in await self?.abortRecording() }
         }
-        hotkeyManager.start()
+        if !hotkeyManager.start() {
+            DiagnosticsLog.record(
+                "Хоткей не запущен. Проверь специальные возможности.",
+                category: "Хоткей",
+                level: .warning
+            )
+            startPermissionCheckTimer()
+        } else {
+            DiagnosticsLog.record("Хоткей запущен.", category: "Хоткей")
+        }
     }
 
     private func handleKeyDown() async {
         switch recordingState {
         case .idle:
-            // Don't start if previous session is still transcribing
+            guard !isStoppingRecording else { return }
             guard audioEngine.state == .idle else { return }
             recordingState = .recording(startedAt: Date())
             await startRecording()
@@ -326,26 +354,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if held >= pttThreshold {
             await finishRecording()
         } else {
-            recordingState = .toggleMode
+            recordingState = .toggleMode(startedAt: startedAt)
         }
-    }
-
-    private var isRecordingActive: Bool {
-        if case .idle = recordingState { return false }
-        return true
     }
 
     private func startRecording() async {
         hotkeyManager.isRecording = true
+        updateRuntimeBusy()
         floatingWindowController?.show()
         RecordingSound.playStart()
         do {
             try await audioEngine.startRecording()
+            DiagnosticsLog.record("Запись началась.", category: "Запись")
             audioMuter.muteIfNeeded()
             scheduleMaxDurationStop()
         } catch {
+            DiagnosticsLog.record(
+                "Не удалось начать запись: \(error.localizedDescription)",
+                category: "Запись",
+                level: .error
+            )
             hotkeyManager.isRecording = false
             recordingState = .idle
+            updateRuntimeBusy()
             audioMuter.unmuteIfNeeded()
             floatingWindowController?.hide()
         }
@@ -364,49 +395,117 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func finishRecording() async {
-        // Single-flight: не даём завершению/вставке наложиться или зациклиться.
-        guard !isFinishing else { return }
-        isFinishing = true
-        defer { isFinishing = false }
+        guard !isStoppingRecording else { return }
+        isStoppingRecording = true
+        updateRuntimeBusy()
 
         maxDurationTask?.cancel(); maxDurationTask = nil
         hotkeyManager.isRecording = false
-        let startedAt: Date? = { if case .recording(let t) = recordingState { return t }; return nil }()
-        recordingState = .idle
+        let startedAt: Date? = {
+            switch recordingState {
+            case .recording(let t), .toggleMode(let t):
+                return t
+            case .idle:
+                return nil
+            }
+        }()
         floatingWindowController?.hide()
         audioMuter.unmuteIfNeeded()
         RecordingSound.playStop()        // сразу слышно, что запись остановлена
-        try? await Task.sleep(for: .milliseconds(400))
-        do {
-            var text = try await audioEngine.stopRecording()
-            text = WordDictionary.apply(to: text)
-            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let seconds = startedAt.map { Int(Date().timeIntervalSince($0)) } ?? audioEngine.speechSamples / 16000
-                let zoneBefore = WarningSettings.zone(minutes: SessionStats.secondsToday / 60)
-                SessionStats.record(text: text, seconds: seconds)
-                NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
-                let zoneAfter = WarningSettings.zone(minutes: SessionStats.secondsToday / 60)
-                if zoneAfter != zoneBefore, zoneAfter != .green {
-                    showStatsPopoverAuto()
-                }
-                if LLMSettings.isEnabled {
-                    do {
-                        text = try await LLMCorrector.shared.correct(text)
-                    } catch {
-                    }
-                }
-                // Перепроверяем уже ПОСЛЕ LLM: если коррекция вернула пусто/пробелы,
-                // ничего не вставляем — иначе в буфер уедет один голый пробел.
-                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                // Suspend tap so our own synthetic ⌘V doesn't re-trigger the hotkey
-                hotkeyManager.suspendForRecorder()
-                PasteManager.paste(text + " ")
-                try? await Task.sleep(for: .milliseconds(150))
-                hotkeyManager.resumeAfterRecorder()
-            }
-        } catch {
-            // silent
+
+        try? await Task.sleep(for: .milliseconds(120))
+        let job = audioEngine.stopRecordingForRecognition()
+        DiagnosticsLog.record(
+            "Запись остановлена: \(job.chunkCount) фрагм., \(formatSeconds(job.speechSamples)) речи.",
+            category: "Запись"
+        )
+        recordingState = .idle
+        isStoppingRecording = false
+        updateRuntimeBusy()
+        enqueueRecognition(job, startedAt: startedAt)
+    }
+
+    private func enqueueRecognition(_ job: AudioEngine.RecognitionJob, startedAt: Date?) {
+        guard !job.isEmpty else {
+            updateRuntimeBusy()
+            return
         }
+
+        queuedRecognitionJobs += 1
+        updateRuntimeBusy()
+
+        let previous = recognitionTail
+        recognitionTail = Task { [weak self] in
+            await previous?.value
+            await self?.processRecognition(job, startedAt: startedAt)
+        }
+    }
+
+    private func processRecognition(_ job: AudioEngine.RecognitionJob, startedAt: Date?) async {
+        defer {
+            queuedRecognitionJobs = max(0, queuedRecognitionJobs - 1)
+            updateRuntimeBusy()
+        }
+
+        let recognitionStartedAt = CFAbsoluteTimeGetCurrent()
+        var text = await audioEngine.recognize(job)
+        let recognitionMs = Int((CFAbsoluteTimeGetCurrent() - recognitionStartedAt) * 1000)
+        DiagnosticsLog.record(
+            "Распознавание завершено: \(formatMilliseconds(recognitionMs)), \(job.chunkCount) фрагм.",
+            category: "Распознавание"
+        )
+        text = WordDictionary.apply(to: text)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            DiagnosticsLog.record("Распознавание вернуло пустой текст.", category: "Распознавание", level: .warning)
+            return
+        }
+
+        let seconds = startedAt.map { Int(Date().timeIntervalSince($0)) } ?? job.speechSamples / 16000
+        let zoneBefore = WarningSettings.zone(minutes: SessionStats.secondsToday / 60)
+        SessionStats.record(text: text, seconds: seconds)
+        NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
+        let zoneAfter = WarningSettings.zone(minutes: SessionStats.secondsToday / 60)
+        if zoneAfter != zoneBefore, zoneAfter != .green {
+            showStatsPopoverAuto()
+        }
+        if LLMSettings.isEnabled {
+            if let configurationError = LLMSettings.apiKeyConfigurationError() {
+                updateLLMStatus(configurationError.localizedDescription)
+                DiagnosticsLog.record(configurationError.localizedDescription, category: "LLM", level: .warning)
+            } else {
+                do {
+                    let llmStartedAt = CFAbsoluteTimeGetCurrent()
+                    text = try await LLMCorrector.shared.correct(text)
+                    let llmMs = Int((CFAbsoluteTimeGetCurrent() - llmStartedAt) * 1000)
+                    updateLLMStatus(nil)
+                    DiagnosticsLog.record("LLM-стилизация выполнена: \(formatMilliseconds(llmMs)).", category: "LLM")
+                } catch {
+                    updateLLMStatus(error.localizedDescription)
+                    DiagnosticsLog.record(error.localizedDescription, category: "LLM", level: .error)
+                }
+            }
+        }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        hotkeyManager.suppressSyntheticPasteEvents()
+        PasteManager.paste(text + " ")
+        DiagnosticsLog.record("Текст скопирован в буфер и вставлен.", category: "Вставка")
+    }
+
+    private func updateLLMStatus(_ message: String?) {
+        let normalized = message?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next = normalized?.isEmpty == false ? normalized : nil
+        guard LLMSettings.lastErrorMessage != next else { return }
+        LLMSettings.lastErrorMessage = next
+        NotificationCenter.default.post(name: .llmStatusDidUpdate, object: nil)
+    }
+
+    private func refreshLLMConfigurationStatus() {
+        guard LLMSettings.isEnabled else {
+            updateLLMStatus(nil)
+            return
+        }
+        updateLLMStatus(LLMSettings.apiKeyConfigurationError()?.localizedDescription)
     }
 
     private func abortRecording() async {
@@ -414,9 +513,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         maxDurationTask?.cancel(); maxDurationTask = nil
         hotkeyManager.isRecording = false
         recordingState = .idle
-        _ = try? await audioEngine.stopRecording()
+        audioEngine.cancelRecording()
+        DiagnosticsLog.record("Запись отменена.", category: "Запись")
         audioMuter.unmuteIfNeeded()
         RecordingSound.playStop()
         floatingWindowController?.hide()
+        updateRuntimeBusy()
+    }
+
+    private func updateRuntimeBusy() {
+        let microphoneBusy: Bool
+        switch recordingState {
+        case .idle:
+            microphoneBusy = isStoppingRecording
+        case .recording, .toggleMode:
+            microphoneBusy = true
+        }
+        RuntimeState.set(
+            microphoneActive: microphoneBusy,
+            busy: microphoneBusy || queuedRecognitionJobs > 0
+        )
+    }
+
+    private func formatSeconds(_ sampleCount: Int) -> String {
+        let seconds = Double(sampleCount) / 16_000
+        return String(format: "%.1f с", seconds)
+    }
+
+    private func formatMilliseconds(_ milliseconds: Int) -> String {
+        milliseconds >= 1000
+            ? String(format: "%.1f с", Double(milliseconds) / 1000)
+            : "\(milliseconds) мс"
     }
 }

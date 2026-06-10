@@ -13,7 +13,11 @@ struct HotkeyRecorderView: View {
 
     var body: some View {
         Button { toggle() } label: {
-            HotkeyVisualization(tokens: displayTokens, isRecording: model.isRecording)
+            HotkeyVisualization(
+                tokens: displayTokens,
+                message: model.rejectionMessage,
+                isRecording: model.isRecording
+            )
         }
         .buttonStyle(.plain)
         .onDisappear { model.cancel() }
@@ -41,11 +45,19 @@ struct HotkeyRecorderView: View {
 
 private struct HotkeyVisualization: View {
     let tokens: [String]
+    let message: String?
     let isRecording: Bool
 
     var body: some View {
         HStack(spacing: 4) {
-            if tokens.isEmpty && isRecording {
+            if let message, isRecording {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(message)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            } else if tokens.isEmpty && isRecording {
                 Circle().fill(Color.accentColor).frame(width: 5, height: 5)
                 Text("Нажмите клавишу…")
                     .font(.system(size: 12, weight: .medium))
@@ -56,10 +68,11 @@ private struct HotkeyVisualization: View {
         }
         .padding(.horizontal, 8).padding(.vertical, 5)
         .frame(minWidth: 130, minHeight: 28)
+        .foregroundStyle(message == nil ? Color.primary : Color(nsColor: GovorunTheme.amber))
         .background(RoundedRectangle(cornerRadius: 7)
-            .fill(isRecording ? Color.accentColor.opacity(0.12) : Color(NSColor.controlBackgroundColor)))
+            .fill(isRecording ? Color.accentColor.opacity(0.12) : GovorunTheme.fieldSurface))
         .overlay(RoundedRectangle(cornerRadius: 7)
-            .stroke(isRecording ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.3), lineWidth: 1))
+            .stroke(isRecording ? Color.accentColor.opacity(0.6) : GovorunTheme.stroke, lineWidth: 1))
     }
 }
 
@@ -84,6 +97,7 @@ private struct KeyCapView: View {
 final class HotkeyRecorderModel: ObservableObject {
     @Published var isRecording = false
     @Published var previewTokens: [String] = []
+    @Published var rejectionMessage: String?
 
     // CGEvent tap — system-level, works regardless of window focus
     nonisolated(unsafe) private var eventTap: CFMachPort?
@@ -101,6 +115,7 @@ final class HotkeyRecorderModel: ObservableObject {
         self.onCapture = onCapture
         isRecording = true
         previewTokens = []
+        rejectionMessage = nil
         peakModifiers = []
         pendingModifierConfig = nil
         hotkeyManager?.suspendForRecorder()
@@ -112,6 +127,7 @@ final class HotkeyRecorderModel: ObservableObject {
         hotkeyManager?.resumeAfterRecorder()
         isRecording = false
         previewTokens = []
+        rejectionMessage = nil
         peakModifiers = []
         pendingModifierConfig = nil
         onCapture = nil
@@ -136,6 +152,7 @@ final class HotkeyRecorderModel: ObservableObject {
         hotkeyManager?.resumeAfterRecorder()
         isRecording = false
         previewTokens = []
+        rejectionMessage = nil
         peakModifiers = []
         pendingModifierConfig = nil
         onCapture = nil
@@ -211,6 +228,10 @@ final class HotkeyRecorderModel: ObservableObject {
         if cfg.isValid {
             pendingModifierConfig = nil
             finish(with: cfg)
+        } else {
+            pendingModifierConfig = nil
+            previewTokens = cfg.displayTokens
+            rejectionMessage = cfg.validationMessage ?? "Нельзя использовать"
         }
     }
 
@@ -223,13 +244,21 @@ final class HotkeyRecorderModel: ObservableObject {
                 return
             }
             previewTokens = []
+            rejectionMessage = nil
         } else {
             peakModifiers.formUnion(mods)
             previewTokens = mods.shortcutDisplayTokens
 
             if HotkeyConfig.isModifierKeyCode(kc) {
                 let candidate = HotkeyConfig.modifierOnly(kc, peakModifiers)
-                pendingModifierConfig = candidate
+                if candidate.isValid {
+                    pendingModifierConfig = candidate
+                    rejectionMessage = nil
+                } else {
+                    pendingModifierConfig = nil
+                    previewTokens = candidate.displayTokens
+                    rejectionMessage = candidate.validationMessage ?? "Нельзя использовать"
+                }
             }
         }
     }

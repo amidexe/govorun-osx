@@ -56,6 +56,59 @@ struct BirdLogoView: View {
 // MARK: - NSImage for status bar (template so it follows system dark/light)
 
 extension NSImage {
+    static func birdStatus(size: CGFloat = 18, needsAttention: Bool) -> NSImage {
+        guard needsAttention else { return birdTemplate(size: size) }
+
+        let img = NSImage(size: NSSize(width: size, height: size), flipped: false) { bounds in
+            let s = Double(bounds.width) / 24.0
+            let ctx = NSGraphicsContext.current!.cgContext
+            ctx.setStrokeColor(NSColor.labelColor.cgColor)
+            ctx.setFillColor(NSColor.labelColor.cgColor)
+            ctx.setLineCap(.round)
+            ctx.setLineJoin(.round)
+
+            ctx.setLineWidth(1.9 * s)
+            ctx.beginPath()
+            ctx.move(to: CGPoint(x: 21.5 * s, y: 13.5 * s))
+            ctx.addLine(to: CGPoint(x: 17.5 * s, y: 15.0 * s))
+            ctx.addCurve(to: CGPoint(x: 6.0 * s, y: 14.5 * s),
+                         control1: CGPoint(x: 14.5 * s, y: 18.5 * s),
+                         control2: CGPoint(x: 9.0 * s, y: 18.5 * s))
+            ctx.addLine(to: CGPoint(x: 3.0 * s, y: 15.5 * s))
+            ctx.addLine(to: CGPoint(x: 4.0 * s, y: 11.5 * s))
+            ctx.addCurve(to: CGPoint(x: 13.0 * s, y: 6.5 * s),
+                         control1: CGPoint(x: 5.5 * s, y: 8.5 * s),
+                         control2: CGPoint(x: 9.0 * s, y: 6.5 * s))
+            ctx.addCurve(to: CGPoint(x: 18.0 * s, y: 11.0 * s),
+                         control1: CGPoint(x: 16.0 * s, y: 6.5 * s),
+                         control2: CGPoint(x: 18.0 * s, y: 8.5 * s))
+            ctx.addLine(to: CGPoint(x: 21.5 * s, y: 12.5 * s))
+            ctx.closePath()
+            ctx.strokePath()
+
+            ctx.setLineWidth(1.5 * s)
+            ctx.beginPath()
+            ctx.move(to: CGPoint(x: 7.5 * s, y: 12.5 * s))
+            ctx.addCurve(to: CGPoint(x: 15.0 * s, y: 10.0 * s),
+                         control1: CGPoint(x: 9.5 * s, y: 10.5 * s),
+                         control2: CGPoint(x: 12.0 * s, y: 9.5 * s))
+            ctx.strokePath()
+
+            ctx.fillEllipse(in: CGRect(x: (15.2 - 0.85) * s, y: (24 - 9.0 - 0.85) * s,
+                                       width: 1.7 * s, height: 1.7 * s))
+
+            let badge = CGRect(x: bounds.maxX - 8, y: bounds.maxY - 8, width: 8, height: 8)
+            ctx.setFillColor(NSColor.systemOrange.cgColor)
+            ctx.fillEllipse(in: badge)
+            ctx.setStrokeColor(NSColor.windowBackgroundColor.withAlphaComponent(0.9).cgColor)
+            ctx.setLineWidth(1)
+            ctx.strokeEllipse(in: badge.insetBy(dx: 0.5, dy: 0.5))
+            return true
+        }
+        img.isTemplate = false
+        return img
+    }
+
     static func birdTemplate(size: CGFloat = 18) -> NSImage {
         let img = NSImage(size: NSSize(width: size, height: size), flipped: false) { bounds in
             let s = Double(bounds.width) / 24.0

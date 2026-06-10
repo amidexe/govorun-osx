@@ -26,6 +26,7 @@ final class GigaAMEngine: @unchecked Sendable {
     // случится во время декодирования (всё — load/unload/decode — на ней).
     private let queue = DispatchQueue(label: "com.govorun.gigaam")
     private let logger = Logger(subsystem: "com.govorun.app", category: "GigaAMEngine")
+    private static let defaultThreadCount: Int32 = 2
 
     // Модель НЕ грузится при старте приложения. Грузится по требованию
     // (preload при старте записи / первая фраза) и выгружается после простоя
@@ -74,16 +75,19 @@ final class GigaAMEngine: @unchecked Sendable {
         let paths = ModelPaths(dir: dir)
         guard paths.areValid() else {
             logger.error("Model files missing at \(dir.path)")
+            DiagnosticsLog.record("Файлы модели GigaAM не найдены.", category: "Распознавание", level: .error)
             return
         }
         for provider in ["coreml", "cpu"] {
             if let r = createRecognizer(paths: paths, provider: provider) {
                 recognizer = r
-                logger.info("GigaAM ready (provider=\(provider))")
+                logger.info("GigaAM ready (provider=\(provider), threads=\(Self.threadCount))")
+                DiagnosticsLog.record("GigaAM готова: \(provider), \(Self.threadCount) потока.", category: "Распознавание")
                 return
             }
         }
         logger.error("Failed to init recognizer with any provider")
+        DiagnosticsLog.record("Не удалось инициализировать GigaAM.", category: "Распознавание", level: .error)
     }
 
     private func createRecognizer(paths: ModelPaths, provider: String) -> OpaquePointer? {
@@ -103,7 +107,7 @@ final class GigaAMEngine: @unchecked Sendable {
                                     cfg.model_config.transducer.decoder = dec
                                     cfg.model_config.transducer.joiner  = join
                                     cfg.model_config.tokens      = tok
-                                    cfg.model_config.num_threads = 1
+                                    cfg.model_config.num_threads = Self.threadCount
                                     cfg.model_config.provider    = prov
                                     cfg.model_config.model_type  = mtype
                                     cfg.decoding_method          = dm
@@ -143,6 +147,13 @@ final class GigaAMEngine: @unchecked Sendable {
 
     static func bundledModelDir() -> URL {
         Bundle.main.resourceURL!.appendingPathComponent("Model")
+    }
+
+    private static var threadCount: Int32 {
+        let env = ProcessInfo.processInfo.environment["GOVORUN_ASR_THREADS"].flatMap(Int32.init)
+        let stored = UserDefaults.standard.object(forKey: "recognitionThreads") as? Int
+        let raw = env ?? stored.map(Int32.init) ?? defaultThreadCount
+        return min(4, max(1, raw))
     }
 }
 

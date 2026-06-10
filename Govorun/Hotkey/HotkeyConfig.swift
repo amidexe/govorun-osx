@@ -18,7 +18,7 @@ struct HotkeyConfig: Equatable {
         Self(kind: .modifierOnly, keyCode: keyCode, modifierFlags: mods)
     }
 
-    static let `default`     = HotkeyConfig.key(UInt16(kVK_Space),  [.option])
+    static let `default`     = HotkeyConfig.modifierOnly(UInt16(kVK_RightOption), [.option])
     static let defaultCancel = HotkeyConfig.key(UInt16(kVK_Escape), [])
 
     // MARK: - UserDefaults
@@ -31,8 +31,9 @@ struct HotkeyConfig: Equatable {
             let mod  = UserDefaults.standard.integer(forKey: "cancelHotkeyModifiers")
             let kind = UserDefaults.standard.string(forKey: "cancelHotkeyKind") ?? "key"
             let k: Kind = kind == "modifierOnly" ? .modifierOnly : .key
-            return HotkeyConfig(kind: k, keyCode: UInt16(kc),
-                                modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(mod)))
+            let cfg = HotkeyConfig(kind: k, keyCode: UInt16(kc),
+                                   modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(mod)))
+            return cfg.isValid ? cfg : nil
         }
         set {
             if let cfg = newValue {
@@ -55,13 +56,15 @@ struct HotkeyConfig: Equatable {
             let kind = UserDefaults.standard.string(forKey: "hotkeyKind") ?? "key"
             guard kc != 0 else { return .default }
             let k: Kind = kind == "modifierOnly" ? .modifierOnly : .key
-            return HotkeyConfig(kind: k, keyCode: UInt16(kc),
-                                modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(mod)))
+            let cfg = HotkeyConfig(kind: k, keyCode: UInt16(kc),
+                                   modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(mod)))
+            return cfg.isValid ? cfg : .default
         }
         set {
-            UserDefaults.standard.set(Int(newValue.keyCode),                forKey: "hotkeyKeyCode")
-            UserDefaults.standard.set(Int(newValue.modifierFlags.rawValue), forKey: "hotkeyModifiers")
-            UserDefaults.standard.set(newValue.kind == .modifierOnly ? "modifierOnly" : "key",
+            let cfg = newValue.isValid ? newValue : .default
+            UserDefaults.standard.set(Int(cfg.keyCode),                forKey: "hotkeyKeyCode")
+            UserDefaults.standard.set(Int(cfg.modifierFlags.rawValue), forKey: "hotkeyModifiers")
+            UserDefaults.standard.set(cfg.kind == .modifierOnly ? "modifierOnly" : "key",
                                       forKey: "hotkeyKind")
         }
     }
@@ -112,10 +115,24 @@ struct HotkeyConfig: Equatable {
         case .modifierOnly:
             return Self.isModifierKeyCode(keyCode)
         case .key:
+            guard validationMessage == nil else { return false }
             guard !Self.isModifierKeyCode(keyCode) else { return false }
             if Self.isSpecialKeyCode(keyCode) { return true }
             return !modifierFlags.intersection([.control, .option, .shift, .command]).isEmpty
         }
+    }
+
+    var validationMessage: String? {
+        if isReservedForPasteShortcut {
+            return "⌘V занят вставкой текста"
+        }
+        return nil
+    }
+
+    private var isReservedForPasteShortcut: Bool {
+        kind == .key &&
+        keyCode == UInt16(kVK_ANSI_V) &&
+        modifierFlags.contains(.command)
     }
 
     static func isModifierKeyCode(_ kc: UInt16) -> Bool { modifierKeyCodes.contains(kc) }

@@ -17,7 +17,9 @@ final class HotkeyManager {
     nonisolated(unsafe) private var cfg:           HotkeyConfig = HotkeyConfig.stored
     nonisolated(unsafe) private var cancelCfg:     HotkeyConfig = HotkeyConfig.cancelStored ?? HotkeyConfig.defaultCancel
     nonisolated(unsafe) private var modifierIsDown = false
+    nonisolated(unsafe) private var modifierPressedAt: UInt64?
     nonisolated(unsafe) private var ignoreEventsUntil: UInt64 = 0
+    nonisolated(unsafe) private var suppressPasteEventsUntil: UInt64 = 0
     // True, пока проглочен keyDown нашего хоткея-клавиши и ещё не пришёл парный keyUp.
     // Гарантирует симметрию: keyUp глотаем ТОЛЬКО если проглотили его keyDown.
     // Иначе ОС увидит нажатие, но не увидит отпускания → клавиша «залипнет»
@@ -25,14 +27,20 @@ final class HotkeyManager {
     nonisolated(unsafe) private var keyHotkeyDown = false
     nonisolated(unsafe) var isRecording = false
 
+    nonisolated private static let modifierInterruptionWindowNanos: UInt64 = 1_000_000_000
+
+    var isActive: Bool { eventTap != nil }
+
     func reloadConfig() {
         cfg = HotkeyConfig.stored
         cancelCfg = HotkeyConfig.cancelStored ?? HotkeyConfig.defaultCancel
         modifierIsDown = false
+        modifierPressedAt = nil
         keyHotkeyDown = false
     }
 
-    func start() {
+    @discardableResult
+    func start() -> Bool {
         stop()
         let mask: CGEventMask =
             (1 << CGEventType.keyDown.rawValue)     |
@@ -50,7 +58,7 @@ final class HotkeyManager {
             userInfo: selfRef
         ) else {
             logger.error("CGEvent tap failed — check Accessibility permission")
-            return
+            return false
         }
         let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
@@ -59,6 +67,7 @@ final class HotkeyManager {
         runLoopSource = src
         armAfterTapChange(seconds: 1.0)
         logger.info("HotkeyManager started: \(self.cfg.displayString)")
+        return true
     }
 
     func stop() {
@@ -72,6 +81,7 @@ final class HotkeyManager {
             eventTap = nil
         }
         modifierIsDown = false
+        modifierPressedAt = nil
         keyHotkeyDown = false
     }
 
@@ -81,9 +91,15 @@ final class HotkeyManager {
     func resumeAfterRecorder() {
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
         modifierIsDown = false
+        modifierPressedAt = nil
         armAfterTapChange(seconds: 0.3)
         // keyHotkeyDown НЕ сбрасываем здесь: если клавиша ещё зажата, тап
         // продолжит глотать автоповтор. Флаг обнулится сам, когда придёт keyUp.
+    }
+
+    func suppressSyntheticPasteEvents(seconds: Double = 0.25) {
+        let nanos = UInt64(seconds * 1_000_000_000)
+        suppressPasteEventsUntil = DispatchTime.now().uptimeNanoseconds + nanos
     }
 
     // MARK: - Event handler
@@ -97,8 +113,14 @@ final class HotkeyManager {
             return Unmanaged.passUnretained(event)
         }
 
+        if DispatchTime.now().uptimeNanoseconds < suppressPasteEventsUntil,
+           isSyntheticPasteEvent(type: type, event: event) {
+            return Unmanaged.passUnretained(event)
+        }
+
         if DispatchTime.now().uptimeNanoseconds < ignoreEventsUntil {
             modifierIsDown = false
+            modifierPressedAt = nil
             keyHotkeyDown = false
             return Unmanaged.passUnretained(event)
         }
@@ -159,8 +181,11 @@ final class HotkeyManager {
         if type == .keyDown && modifierIsDown {
             let kc = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
             if !HotkeyConfig.isModifierKeyCode(kc) {
-                modifierIsDown = false
-                Task { @MainActor in self.onKeyAborted?() }
+                if shouldAbortModifierShortcutForChord() {
+                    modifierIsDown = false
+                    modifierPressedAt = nil
+                    Task { @MainActor in self.onKeyAborted?() }
+                }
             }
             return Unmanaged.passUnretained(event)
         }
@@ -175,11 +200,13 @@ final class HotkeyManager {
             guard kc == cfg.keyCode else { return Unmanaged.passUnretained(event) }
             guard cgFlags.contains(expected) else { return Unmanaged.passUnretained(event) }
             modifierIsDown = true
+            modifierPressedAt = DispatchTime.now().uptimeNanoseconds
             Task { @MainActor in self.onKeyDown?() }
             return nil
         } else {
             if kc == cfg.keyCode {
                 modifierIsDown = false
+                modifierPressedAt = nil
                 Task { @MainActor in self.onKeyUp?() }
                 return nil
             }
@@ -192,5 +219,17 @@ final class HotkeyManager {
     nonisolated private func armAfterTapChange(seconds: Double) {
         let nanos = UInt64(seconds * 1_000_000_000)
         ignoreEventsUntil = DispatchTime.now().uptimeNanoseconds + nanos
+    }
+
+    nonisolated private func shouldAbortModifierShortcutForChord() -> Bool {
+        guard let modifierPressedAt else { return true }
+        let elapsed = DispatchTime.now().uptimeNanoseconds - modifierPressedAt
+        return elapsed <= Self.modifierInterruptionWindowNanos
+    }
+
+    nonisolated private func isSyntheticPasteEvent(type: CGEventType, event: CGEvent) -> Bool {
+        guard type == .keyDown || type == .keyUp else { return false }
+        let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+        return keyCode == 0x37 || keyCode == 0x09
     }
 }

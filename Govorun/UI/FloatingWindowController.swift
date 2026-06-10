@@ -31,7 +31,7 @@ final class FloatingWindowController: NSWindowController {
     func show() {
         installContentIfNeeded()
         NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
-        visibility.isActive = true          // запускает pulse-анимацию
+        visibility.isActive = true
         positionPanel()
         window?.alphaValue = 0
         window?.orderFront(nil)
@@ -48,7 +48,7 @@ final class FloatingWindowController: NSWindowController {
         }, completionHandler: { [weak self] in
             Task { @MainActor in
                 self?.window?.orderOut(nil)
-                self?.visibility.isActive = false   // останавливает pulse — нет фоновой нагрузки
+                self?.visibility.isActive = false
             }
         })
     }

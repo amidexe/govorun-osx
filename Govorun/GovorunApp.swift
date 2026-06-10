@@ -3,6 +3,7 @@ import Foundation
 
 extension Notification.Name {
     static let statsDidUpdate = Notification.Name("statsDidUpdate")
+    static let llmStatusDidUpdate = Notification.Name("llmStatusDidUpdate")
 }
 
 @main

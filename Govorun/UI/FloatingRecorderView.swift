@@ -1,8 +1,8 @@
 import SwiftUI
 import AppKit
 
-/// Активна ли запись (окно показано). Гейтит pulse-анимацию, чтобы она не
-/// крутилась 24/7 в фоне и не жгла CPU, когда запись не идёт.
+/// Активна ли запись (окно показано). Держим это состояние отдельно от окна,
+/// чтобы индикатор не выполнял лишнюю работу, когда запись не идёт.
 final class RecorderVisibility: ObservableObject {
     @Published var isActive = false
 }
@@ -11,7 +11,6 @@ struct FloatingRecorderView: View {
     @ObservedObject var visibility: RecorderVisibility
     @Environment(\.colorScheme) var colorScheme
 
-    @State private var pulse          = false
     @State private var minutesToday:  Int = 0
     @State private var yellowLimit:   Int = WarningSettings.yellowMinutes
     @State private var redLimit:      Int = WarningSettings.redMinutes
@@ -21,8 +20,8 @@ struct FloatingRecorderView: View {
         guard WarningSettings.isEnabled else {
             return colorScheme == .dark ? .white : Color(NSColor.secondaryLabelColor)
         }
-        if minutesToday >= redLimit    { return .red }
-        if minutesToday >= yellowLimit { return Color(red: 1.0, green: 0.5, blue: 0.0) }
+        if minutesToday >= redLimit    { return Color(nsColor: GovorunTheme.red) }
+        if minutesToday >= yellowLimit { return Color(nsColor: GovorunTheme.amber) }
         return colorScheme == .dark ? .white : Color(NSColor.secondaryLabelColor)
     }
 
@@ -33,7 +32,10 @@ struct FloatingRecorderView: View {
             Circle()
                 .fill(
                     RadialGradient(
-                        colors: [Color.red.opacity(pulse ? (colorScheme == .dark ? 0.45 : 0.70) : (colorScheme == .dark ? 0.10 : 0.25)), .clear],
+                        colors: [
+                            Color.red.opacity(visibility.isActive ? (colorScheme == .dark ? 0.32 : 0.48) : 0),
+                            .clear
+                        ],
                         center: .center,
                         startRadius: 0,
                         endRadius: Self.size * 0.48
@@ -48,25 +50,11 @@ struct FloatingRecorderView: View {
             minutesToday = SessionStats.secondsToday / 60
             yellowLimit  = WarningSettings.yellowMinutes
             redLimit     = WarningSettings.redMinutes
-            updatePulse(visibility.isActive)
         }
-        .onChange(of: visibility.isActive) { updatePulse($0) }
         .onReceive(NotificationCenter.default.publisher(for: .statsDidUpdate)) { _ in
             minutesToday = SessionStats.secondsToday / 60
             yellowLimit  = WarningSettings.yellowMinutes
             redLimit     = WarningSettings.redMinutes
-        }
-    }
-
-    // Pulse крутится ТОЛЬКО когда окно показано (идёт запись). Иначе анимация
-    // остановлена — нет фоновой нагрузки на CPU.
-    private func updatePulse(_ active: Bool) {
-        if active {
-            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
-        } else {
-            withAnimation(.easeInOut(duration: 0.2)) { pulse = false }
         }
     }
 }

@@ -7,6 +7,19 @@ import os
 final class AudioEngine: ObservableObject {
     enum State { case idle, recording, processing }
 
+    struct RecognitionJob {
+        fileprivate let tasks: [Task<RecognitionChunk, Never>]
+        let speechSamples: Int
+
+        var isEmpty: Bool { tasks.isEmpty }
+        var chunkCount: Int { tasks.count }
+    }
+
+    fileprivate struct RecognitionChunk {
+        let index: Int
+        let text: String
+    }
+
     @Published var state: State = .idle
     @Published var audioLevel: Double = 0
     @Published var transcribedText: String = ""
@@ -27,13 +40,11 @@ final class AudioEngine: ObservableObject {
 
     // PCM window accumulator — Silero needs exactly 512 samples per call
     private var windowBuf: [Float] = []
+    private var recognizerPreloadStarted = false
 
     // Streaming transcription
-    private var accumulated      = ""
-    private var chunkResults     = [Int: String]()
     private var nextChunkIdx     = 0
-    private var nextFlushIdx     = 0
-    private var pendingTasks     = [Task<Void, Never>]()
+    private var pendingTasks     = [Task<RecognitionChunk, Never>]()
     // Только реальная речь (VAD-сегменты), без пауз
     private(set) var speechSamples: Int = 0
 
@@ -42,16 +53,14 @@ final class AudioEngine: ObservableObject {
         state = .recording
         transcribedText = ""
 
-        // Прерываем отложенную выгрузку и греем модель, пока пользователь говорит.
+        // Прерываем отложенную выгрузку. Распознаватель греем только после
+        // появления речи, чтобы включенная запись в тишине не жгла CPU.
         idleCleanupTask?.cancel(); idleCleanupTask = nil
-        gigaAM.preload()
 
-        accumulated   = ""
-        chunkResults  = [:]
         nextChunkIdx  = 0
-        nextFlushIdx  = 0
         pendingTasks  = []
         windowBuf     = []
+        recognizerPreloadStarted = false
         speechSamples = 0
 
         let pause = PauseLength.stored
@@ -73,8 +82,10 @@ final class AudioEngine: ObservableObject {
         logger.info("Recording started → \(url.lastPathComponent)")
     }
 
-    func stopRecording() async throws -> String {
-        guard state == .recording else { return "" }
+    func stopRecordingForRecognition() -> RecognitionJob {
+        guard state == .recording else {
+            return RecognitionJob(tasks: [], speechSamples: 0)
+        }
         state = .processing
         stopLevelTimer()
         audioLevel = 0
@@ -86,48 +97,71 @@ final class AudioEngine: ObservableObject {
 
         // Feed remaining + flush VAD to get final segment
         if let vad {
-            var leftovers = windowBuf + remaining
-            var offset = 0
-            while leftovers.count - offset >= SileroVAD.windowSize {
-                let end = offset + SileroVAD.windowSize
-                let win = Array(leftovers[offset..<end])
-                offset = end
-                let segs = vad.accept(win)
-                for s in segs where s.count > 1600 { scheduleChunk(s) }
-            }
-            if offset > 0 { leftovers.removeFirst(offset) }
+            _ = feedSamplesToVAD(remaining)
             // Flush for final segment
             let finalSegs = vad.flushAndDrain()
             for s in finalSegs where s.count > 1600 { scheduleChunk(s) }
-            // Raw tail fallback: if nothing came from VAD but we have audio
-            if finalSegs.isEmpty && !leftovers.isEmpty && leftovers.count > 1600 {
-                scheduleChunk(leftovers)
-            }
         } else if remaining.count > 1600 {
             scheduleChunk(remaining)
         }
         windowBuf = []
 
-        for task in pendingTasks { await task.value }
+        let job = RecognitionJob(tasks: pendingTasks, speechSamples: speechSamples)
+
         pendingTasks = []
-        flushResults()
+        nextChunkIdx = 0
+        speechSamples = 0
 
         if let url = recordingURL {
             recordingURL = nil
             try? FileManager.default.removeItem(at: url)
         }
 
-        let result = accumulated
-        transcribedText = result
-        accumulated  = ""
-        chunkResults = [:]
-        nextChunkIdx = 0
-        nextFlushIdx = 0
-
         state = .idle
+        return job
+    }
+
+    func recognize(_ job: RecognitionJob) async -> String {
+        let results = await withTaskGroup(of: RecognitionChunk.self) { group in
+            for task in job.tasks {
+                group.addTask { await task.value }
+            }
+
+            var chunks: [RecognitionChunk] = []
+            for await chunk in group {
+                chunks.append(chunk)
+            }
+            return chunks.sorted { $0.index < $1.index }
+        }
+
+        let result = results
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        transcribedText = result
         logger.info("Final: \(result.prefix(80))")
         scheduleIdleCleanup()
         return result
+    }
+
+    func cancelRecording() {
+        guard state == .recording || state == .processing else { return }
+        stopLevelTimer()
+        audioLevel = 0
+        recorder?.stopRecording()
+        recorder = nil
+        pendingTasks.forEach { $0.cancel() }
+        pendingTasks = []
+        nextChunkIdx = 0
+        windowBuf = []
+        speechSamples = 0
+        if let url = recordingURL {
+            recordingURL = nil
+            try? FileManager.default.removeItem(at: url)
+        }
+        state = .idle
+        scheduleIdleCleanup()
     }
 
     /// После простоя выгружаем GigaAM и VAD из памяти — чтобы в покое не висели
@@ -147,38 +181,69 @@ final class AudioEngine: ObservableObject {
         speechSamples += samples.count
         let idx = nextChunkIdx
         nextChunkIdx += 1
-        let task = Task<Void, Never> { [weak self] in
-            await self?.processChunk(samples, index: idx)
+        let recognizer = gigaAM
+        let logger = logger
+        let task = Task<RecognitionChunk, Never> {
+            guard !Task.isCancelled else {
+                return RecognitionChunk(index: idx, text: "")
+            }
+            do {
+                let text = try await recognizer.transcribeSamples(samples)
+                return RecognitionChunk(index: idx, text: text)
+            } catch {
+                logger.error("Chunk \(idx) error: \(error.localizedDescription)")
+                return RecognitionChunk(index: idx, text: "")
+            }
         }
         pendingTasks.append(task)
     }
 
-    private func processChunk(_ samples: [Float], index: Int) async {
-        do {
-            let text = try await gigaAM.transcribeSamples(samples)
-            chunkResults[index] = text
-        } catch {
-            chunkResults[index] = ""
-            logger.error("Chunk \(index) error: \(error.localizedDescription)")
+    @discardableResult
+    private func feedSamplesToVAD(_ samples: [Float]) -> Bool {
+        guard let vad, !samples.isEmpty else { return false }
+        windowBuf.append(contentsOf: samples)
+
+        var offset = 0
+        var segments: [[Float]] = []
+        windowBuf.withUnsafeBufferPointer { buffer in
+            guard let base = buffer.baseAddress else { return }
+            while buffer.count - offset >= SileroVAD.windowSize {
+                let window = UnsafeBufferPointer(
+                    start: base.advanced(by: offset),
+                    count: SileroVAD.windowSize
+                )
+                segments.append(contentsOf: vad.accept(window))
+                offset += SileroVAD.windowSize
+            }
         }
-        flushResults()
+
+        if offset == windowBuf.count {
+            windowBuf.removeAll(keepingCapacity: true)
+        } else if offset > 0 {
+            windowBuf.removeFirst(offset)
+        }
+
+        if vad.isSpeechDetected() {
+            preloadRecognizerOnce()
+        }
+
+        var emittedSegment = false
+        for seg in segments where seg.count > 1600 {
+            emittedSegment = true
+            scheduleChunk(seg)
+        }
+        return emittedSegment
     }
 
-    private func flushResults() {
-        while let text = chunkResults[nextFlushIdx] {
-            let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !t.isEmpty {
-                accumulated += accumulated.isEmpty ? t : " " + t
-                transcribedText = accumulated
-            }
-            chunkResults.removeValue(forKey: nextFlushIdx)
-            nextFlushIdx += 1
-        }
+    private func preloadRecognizerOnce() {
+        guard !recognizerPreloadStarted else { return }
+        recognizerPreloadStarted = true
+        gigaAM.preload()
     }
 
     private func startLevelTimer() {
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(64))
+        timer.schedule(deadline: .now(), repeating: .milliseconds(100))
         timer.setEventHandler { [weak self] in
             guard let self, let rec = self.recorder else { return }
 
@@ -189,22 +254,10 @@ final class AudioEngine: ObservableObject {
             self.audioLevel = max(0, min(1, norm))
 
             // Pull new samples and feed Silero VAD in 512-sample windows
-            guard let vad = self.vad else { return }
+            guard self.vad != nil else { return }
             let newSamples = rec.drainSamples()
             guard !newSamples.isEmpty else { return }
-
-            self.windowBuf.append(contentsOf: newSamples)
-            var offset = 0
-            while self.windowBuf.count - offset >= SileroVAD.windowSize {
-                let end = offset + SileroVAD.windowSize
-                let win = Array(self.windowBuf[offset..<end])
-                offset = end
-                let segs = vad.accept(win)
-                for seg in segs where seg.count > 1600 {
-                    self.scheduleChunk(seg)
-                }
-            }
-            if offset > 0 { self.windowBuf.removeFirst(offset) }
+            _ = self.feedSamplesToVAD(newSamples)
         }
         timer.resume()
         levelTimer = timer

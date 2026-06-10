@@ -47,9 +47,9 @@ final class SileroVAD {
         vad = modelURL.path.withCString { modelPath in
             var silero = SherpaOnnxSileroVadModelConfig()
             silero.model              = modelPath
-            silero.threshold          = 0.25
+            silero.threshold          = 0.5
             silero.min_silence_duration = pauseLength.seconds
-            silero.min_speech_duration  = 0.15
+            silero.min_speech_duration  = 0.25
             silero.window_size          = Int32(SileroVAD.windowSize)
             silero.max_speech_duration  = 30.0
 
@@ -77,12 +77,15 @@ final class SileroVAD {
         if let v = vad { SherpaOnnxVoiceActivityDetectorReset(v) }
     }
 
-/// Feed exactly `windowSize` Float32 samples. Returns detected speech segments.
+    /// Feed exactly `windowSize` Float32 samples. Returns detected speech segments.
     func accept(_ samples: [Float]) -> [[Float]] {
+        samples.withUnsafeBufferPointer { accept($0) }
+    }
+
+    /// Feed exactly `windowSize` Float32 samples without allocating a new Array.
+    func accept(_ samples: UnsafeBufferPointer<Float>) -> [[Float]] {
         guard let v = vad else { return [] }
-        samples.withUnsafeBufferPointer { ptr in
-            SherpaOnnxVoiceActivityDetectorAcceptWaveform(v, ptr.baseAddress, Int32(samples.count))
-        }
+        SherpaOnnxVoiceActivityDetectorAcceptWaveform(v, samples.baseAddress, Int32(samples.count))
         return drainSegments()
     }
 

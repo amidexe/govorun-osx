@@ -16,6 +16,8 @@ final class CoreAudioRecorder: @unchecked Sendable {
     private var renderBufferSize: UInt32 = 0
     private var conversionBuffer: UnsafeMutablePointer<Int16>?
     private var conversionBufferSize: UInt32 = 0
+    private var floatScratch: [Float] = []
+    private let writeDebugWav = ProcessInfo.processInfo.environment["GOVORUN_WRITE_DEBUG_WAV"] == "1"
 
     private let meterLock = NSLock()
     private var _averagePower: Float = -160
@@ -44,7 +46,11 @@ final class CoreAudioRecorder: @unchecked Sendable {
         try setDevice(deviceID)
         try configureFormats()
         try setupCallback()
-        try createOutputFile(at: url)
+        if writeDebugWav {
+            try createOutputFile(at: url)
+        } else {
+            try? FileManager.default.removeItem(at: url)
+        }
         try startUnit()
         isRecording = true
         logger.info("Recording started, device=\(deviceID)")
@@ -56,6 +62,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
         if let f = audioFile { ExtAudioFileDispose(f); audioFile = nil }
         renderBuffer?.deallocate();    renderBuffer = nil;    renderBufferSize = 0
         conversionBuffer?.deallocate(); conversionBuffer = nil; conversionBufferSize = 0
+        floatScratch.removeAll(keepingCapacity: false)
         isRecording = false
         meterLock.withLock { _averagePower = -160; _peakPower = -160 }
         sampleLock.withLock { _sampleBuffer.removeAll() }
@@ -163,26 +170,12 @@ final class CoreAudioRecorder: @unchecked Sendable {
         let status = AudioUnitRender(u, flags, ts, bus, frames, &bl)
         guard status == noErr else { return status }
 
-        updateMeters(buf: &bl, frames: frames)
         writeConverted(buf: &bl, frames: frames)
         return noErr
     }
 
-    private func updateMeters(buf: inout AudioBufferList, frames: UInt32) {
-        guard let data = buf.mBuffers.mData else { return }
-        let samples = data.assumingMemoryBound(to: Float32.self)
-        let ch = Int(deviceFormat.mChannelsPerFrame)
-        let total = Int(frames) * ch
-        guard total > 0 else { return }
-        var sum: Float = 0, peak: Float = 0
-        for i in 0..<total { let s = abs(samples[i]); sum += s * s; if s > peak { peak = s } }
-        let avg = 20 * log10(max(sqrt(sum / Float(total)), 0.000001))
-        let pk  = 20 * log10(max(peak, 0.000001))
-        meterLock.withLock { _averagePower = avg; _peakPower = pk }
-    }
-
     private func writeConverted(buf: inout AudioBufferList, frames: UInt32) {
-        guard let file = audioFile, let inp = buf.mBuffers.mData, let outBuf = conversionBuffer else { return }
+        guard let inp = buf.mBuffers.mData else { return }
         let inSamples = inp.assumingMemoryBound(to: Float32.self)
         let ch = deviceFormat.mChannelsPerFrame
         let inRate  = deviceFormat.mSampleRate
@@ -191,12 +184,26 @@ final class CoreAudioRecorder: @unchecked Sendable {
         let outFrames = UInt32(Double(frames) * ratio)
         guard outFrames > 0, outFrames <= conversionBufferSize else { return }
 
+        let writeFile = audioFile != nil && conversionBuffer != nil
+        floatScratch.removeAll(keepingCapacity: true)
+        floatScratch.reserveCapacity(Int(outFrames))
+
+        var sum: Float = 0
+        var peak: Float = 0
+
         if inRate == outRate {
             for i in 0..<Int(frames) {
                 var s: Float32 = 0
                 for c in 0..<Int(ch) { s += inSamples[i * Int(ch) + c] }
                 s /= Float32(ch)
-                outBuf[i] = Int16(max(-32768, min(32767, s * 32767)))
+                s = max(-1, min(1, s))
+                let absSample = abs(s)
+                sum += s * s
+                if absSample > peak { peak = absSample }
+                floatScratch.append(Float(s))
+                if writeFile, let outBuf = conversionBuffer {
+                    outBuf[i] = Int16(max(-32768, min(32767, s * 32767)))
+                }
             }
         } else {
             for i in 0..<Int(outFrames) {
@@ -211,19 +218,30 @@ final class CoreAudioRecorder: @unchecked Sendable {
                     s += s0 + frac * (s1 - s0)
                 }
                 s /= Float32(ch)
-                outBuf[i] = Int16(max(-32768, min(32767, s * 32767)))
+                s = max(-1, min(1, s))
+                let absSample = abs(s)
+                sum += s * s
+                if absSample > peak { peak = absSample }
+                floatScratch.append(Float(s))
+                if writeFile, let outBuf = conversionBuffer {
+                    outBuf[i] = Int16(max(-32768, min(32767, s * 32767)))
+                }
             }
         }
 
-        var outBL = AudioBufferList(mNumberBuffers: 1,
-                                    mBuffers: AudioBuffer(mNumberChannels: 1,
-                                                          mDataByteSize: outFrames * 2,
-                                                          mData: outBuf))
-        ExtAudioFileWrite(file, outFrames, &outBL)
+        let avg = 20 * log10(max(sqrt(sum / Float(max(1, floatScratch.count))), 0.000001))
+        let pk  = 20 * log10(max(peak, 0.000001))
+        meterLock.withLock { _averagePower = avg; _peakPower = pk }
 
-        let count = Int(outFrames)
-        let floats = (0..<count).map { Float(outBuf[$0]) / 32768.0 }
-        sampleLock.withLock { _sampleBuffer.append(contentsOf: floats) }
+        if let file = audioFile, let outBuf = conversionBuffer {
+            var outBL = AudioBufferList(mNumberBuffers: 1,
+                                        mBuffers: AudioBuffer(mNumberChannels: 1,
+                                                              mDataByteSize: outFrames * 2,
+                                                              mData: outBuf))
+            ExtAudioFileWrite(file, outFrames, &outBL)
+        }
+
+        sampleLock.withLock { _sampleBuffer.append(contentsOf: floatScratch) }
     }
 
     // MARK: - Helpers
