@@ -42,13 +42,6 @@ struct MetricCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(NSColor.controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-        )
+        .govorunSurface()
     }
 }

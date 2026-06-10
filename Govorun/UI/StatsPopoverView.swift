@@ -3,15 +3,16 @@ import SwiftUI
 struct StatsPopoverView: View {
     var onOpenSettings: () -> Void = {}
 
-    // Экраны счётчика: тап листает Сегодня → Вчера → Всё время.
+    // Экраны счётчика: тап листает Сегодня → Вчера → Неделя → Всего.
     private enum Screen: Int, CaseIterable {
-        case today, yesterday, allTime
+        case today, yesterday, week, allTime
 
         var title: String {
             switch self {
             case .today:     return "Сегодня"
             case .yesterday: return "Вчера"
-            case .allTime:   return "Всё время"
+            case .week:      return "Неделя"
+            case .allTime:   return "Всего"
             }
         }
 
@@ -19,6 +20,7 @@ struct StatsPopoverView: View {
             switch self {
             case .today:     return "calendar"
             case .yesterday: return "clock.arrow.circlepath"
+            case .week:      return "calendar.badge.clock"
             case .allTime:   return "sum"
             }
         }
@@ -35,6 +37,9 @@ struct StatsPopoverView: View {
     @State private var sessionCountYesterday = SessionStats.sessionCountYesterday
     @State private var wordCountYesterday = SessionStats.wordCountYesterday
     @State private var secondsYesterday = SessionStats.secondsYesterday
+    @State private var sessionCountWeek = SessionStats.currentWeekStat.sessions
+    @State private var wordCountWeek = SessionStats.currentWeekStat.words
+    @State private var secondsWeek = SessionStats.currentWeekStat.seconds
     @State private var yellowThreshold = WarningSettings.yellowMinutes
     @State private var redThreshold = WarningSettings.redMinutes
 
@@ -85,7 +90,7 @@ struct StatsPopoverView: View {
         .frame(width: 236, height: 116)
         .contentShape(Rectangle())
         .onTapGesture { withAnimation(.easeInOut(duration: 0.18)) { cycleScreen() } }
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(GovorunTheme.surface)
         .overlay(alignment: .topLeading) {
             Rectangle()
                 .fill(currentAccent)
@@ -104,13 +109,14 @@ struct StatsPopoverView: View {
                     .frame(width: item == screen ? 6 : 4, height: item == screen ? 6 : 4)
             }
         }
-        .frame(width: 28, alignment: .trailing)
+        .frame(width: 36, alignment: .trailing)
     }
 
     private var currentWords: Int {
         switch screen {
         case .today:     return wordCountToday
         case .yesterday: return wordCountYesterday
+        case .week:      return wordCountWeek
         case .allTime:   return wordCount
         }
     }
@@ -119,6 +125,7 @@ struct StatsPopoverView: View {
         switch screen {
         case .today:     return sessionCountToday
         case .yesterday: return sessionCountYesterday
+        case .week:      return sessionCountWeek
         case .allTime:   return sessionCount
         }
     }
@@ -127,21 +134,22 @@ struct StatsPopoverView: View {
         switch screen {
         case .today:     return secondsToday
         case .yesterday: return secondsYesterday
+        case .week:      return secondsWeek
         case .allTime:   return secondsTotal
         }
     }
 
     private var currentAccent: Color {
-        guard screen == .today else { return Color(red: 0.44, green: 0.48, blue: 0.56) }
+        guard screen == .today else { return Color(nsColor: .secondaryLabelColor) }
         return todayZoneColor
     }
 
     private var todayZoneColor: Color {
-        guard WarningSettings.isEnabled else { return Color(red: 0.18, green: 0.42, blue: 0.92) }
+        guard WarningSettings.isEnabled else { return Color(nsColor: GovorunTheme.blue) }
         let minutes = secondsToday / 60
-        if minutes >= redThreshold { return Color(red: 0.82, green: 0.18, blue: 0.20) }
-        if minutes >= yellowThreshold { return Color(red: 0.82, green: 0.48, blue: 0.10) }
-        return Color(red: 0.18, green: 0.56, blue: 0.34)
+        if minutes >= redThreshold { return Color(nsColor: GovorunTheme.red) }
+        if minutes >= yellowThreshold { return Color(nsColor: GovorunTheme.amber) }
+        return Color(nsColor: GovorunTheme.green)
     }
 
     private func cycleScreen() {
@@ -176,6 +184,10 @@ struct StatsPopoverView: View {
         sessionCountYesterday = SessionStats.sessionCountYesterday
         wordCountYesterday = SessionStats.wordCountYesterday
         secondsYesterday = SessionStats.secondsYesterday
+        let week = SessionStats.currentWeekStat
+        sessionCountWeek = week.sessions
+        wordCountWeek = week.words
+        secondsWeek = week.seconds
         yellowThreshold = WarningSettings.yellowMinutes
         redThreshold = WarningSettings.redMinutes
     }

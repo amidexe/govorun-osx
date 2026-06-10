@@ -33,9 +33,9 @@ struct StatsView: View {
 
         var color: NSColor {
             switch self {
-            case .words:    return NSColor(calibratedRed: 0.18, green: 0.42, blue: 0.92, alpha: 1)
-            case .minutes:  return NSColor(calibratedRed: 0.78, green: 0.40, blue: 0.10, alpha: 1)
-            case .sessions: return NSColor(calibratedRed: 0.18, green: 0.55, blue: 0.34, alpha: 1)
+            case .words:    return GovorunTheme.blue
+            case .minutes:  return GovorunTheme.amber
+            case .sessions: return GovorunTheme.green
             }
         }
 
@@ -48,32 +48,19 @@ struct StatsView: View {
         }
     }
 
-    private enum Period: String, CaseIterable, Identifiable {
-        case week, month
-
-        var id: String { rawValue }
-        var label: String { self == .week ? "Неделя" : "Месяц" }
-
-        func load() -> [(date: Date, stat: DayStat)] {
-            switch self {
-            case .week:  return SessionStats.lastDays(7)
-            case .month: return SessionStats.currentMonthDays()
-            }
-        }
-    }
-
     private struct SummaryItem: Identifiable {
         let id: String
         let title: String
         let value: Int
+        let unit: String
         let sessions: Int
+        let words: Int
         let seconds: Int
         let accent: NSColor
     }
 
     @State private var metric: Metric = .words
-    @State private var period: Period = .week
-    @State private var days: [(date: Date, stat: DayStat)] = SessionStats.lastDays(7)
+    @State private var days: [(date: Date, stat: DayStat)] = SessionStats.currentWeekDays()
 
     @State private var todayW = 0
     @State private var todayS = 0
@@ -81,6 +68,9 @@ struct StatsView: View {
     @State private var ydayW = 0
     @State private var ydayS = 0
     @State private var ydaySec = 0
+    @State private var weekW = 0
+    @State private var weekS = 0
+    @State private var weekSec = 0
     @State private var allW = 0
     @State private var allS = 0
     @State private var allSec = 0
@@ -97,8 +87,8 @@ struct StatsView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(GovorunTheme.pageBackground)
         .onAppear(perform: refresh)
-        .onChange(of: period) { _ in refresh() }
         .onReceive(NotificationCenter.default.publisher(for: .statsDidUpdate)) { _ in refresh() }
     }
 
@@ -107,35 +97,36 @@ struct StatsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Статистика")
                     .font(.system(size: 17, weight: .semibold))
-                Text(periodRangeText)
+                Text(weekRangeText)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
 
             Spacer()
-
-            Picker("", selection: $period) {
-                ForEach(Period.allCases) { item in
-                    Text(item.label).tag(item)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(width: 148)
         }
     }
 
     private var summaryStrip: some View {
-        HStack(spacing: 8) {
+        LazyVGrid(columns: summaryColumns, spacing: 8) {
             ForEach(summaryItems) { item in
                 SummaryTile(
                     title: item.title,
                     value: item.value,
-                    detail: "\(sessionsText(item.sessions)) • \(minutesText(item.seconds))",
+                    unit: item.unit,
+                    detail: summaryDetail(item),
                     accent: item.accent
                 )
             }
         }
+    }
+
+    private var summaryColumns: [GridItem] {
+        [
+            GridItem(.flexible(), spacing: 8),
+            GridItem(.flexible(), spacing: 8),
+            GridItem(.flexible(), spacing: 8),
+            GridItem(.flexible(), spacing: 8)
+        ]
     }
 
     private var chartSection: some View {
@@ -178,34 +169,30 @@ struct StatsView: View {
                 )
                 .frame(height: 190)
 
-                if totalForPeriod == 0 {
+                if totalForWeek == 0 {
                     Text("0 \(metric.totalUnit)")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(.background, in: Capsule())
+                        .background(GovorunTheme.surface, in: Capsule())
                 }
             }
 
             footerRow
         }
         .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-        )
+        .govorunSurface()
     }
 
     private var footerRow: some View {
         HStack(spacing: 10) {
-            Text("\(totalForPeriod.formatted()) \(metric.totalUnit)")
+            Text("\(totalForWeek.formatted()) \(metric.totalUnit)")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Color(nsColor: metric.color))
                 .monospacedDigit()
 
-            Text(period == .month ? "с 1 числа" : "последние 7 дней")
+            Text("текущая неделя, Пн-Вс")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
 
@@ -222,17 +209,59 @@ struct StatsView: View {
         HStack(spacing: 6) {
             Image(systemName: "internaldrive")
                 .font(.system(size: 10, weight: .medium))
-            Text("Локально • дневная история \(SessionStats.historyRetentionDays) дней")
+            Text("Данные хранятся локально • графики по дневной истории \(SessionStats.historyRetentionDays) дней")
                 .font(.system(size: 10))
+            Spacer(minLength: 8)
+            Text("Всего: \(allW.formatted()) слов • \(allS.formatted()) сессий")
+                .font(.system(size: 10))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
         .foregroundStyle(.tertiary)
     }
 
     private var summaryItems: [SummaryItem] {
         [
-            SummaryItem(id: "today", title: "Сегодня", value: todayW, sessions: todayS, seconds: todaySec, accent: todayZoneColor),
-            SummaryItem(id: "yesterday", title: "Вчера", value: ydayW, sessions: ydayS, seconds: ydaySec, accent: NSColor.secondaryLabelColor),
-            SummaryItem(id: "all", title: "Всего", value: allW, sessions: allS, seconds: allSec, accent: metric.color)
+            SummaryItem(
+                id: "today",
+                title: "Сегодня",
+                value: summaryValue(words: todayW, sessions: todayS, seconds: todaySec),
+                unit: metric.totalUnit,
+                sessions: todayS,
+                words: todayW,
+                seconds: todaySec,
+                accent: todayZoneColor
+            ),
+            SummaryItem(
+                id: "yesterday",
+                title: "Вчера",
+                value: summaryValue(words: ydayW, sessions: ydayS, seconds: ydaySec),
+                unit: metric.totalUnit,
+                sessions: ydayS,
+                words: ydayW,
+                seconds: ydaySec,
+                accent: NSColor.secondaryLabelColor
+            ),
+            SummaryItem(
+                id: "week",
+                title: "Неделя",
+                value: summaryValue(words: weekW, sessions: weekS, seconds: weekSec),
+                unit: metric.totalUnit,
+                sessions: weekS,
+                words: weekW,
+                seconds: weekSec,
+                accent: metric.color
+            ),
+            SummaryItem(
+                id: "all",
+                title: "Всего",
+                value: summaryValue(words: allW, sessions: allS, seconds: allSec),
+                unit: metric.totalUnit,
+                sessions: allS,
+                words: allW,
+                seconds: allSec,
+                accent: metric.color
+            )
         ]
     }
 
@@ -246,7 +275,7 @@ struct StatsView: View {
         }
     }
 
-    private var totalForPeriod: Int {
+    private var totalForWeek: Int {
         days.reduce(0) { $0 + metric.value($1.stat) }
     }
 
@@ -256,31 +285,36 @@ struct StatsView: View {
         return max(1, Int(Double(max(maxData, zoneMax)) * 1.18))
     }
 
-    private var periodRangeText: String {
+    private var weekRangeText: String {
         guard let first = days.first?.date, let last = days.last?.date else { return "Нет данных" }
-        return "\(Self.shortDateFormatter.string(from: first)) - \(Self.shortDateFormatter.string(from: last))"
+        let range = "\(Self.shortDateFormatter.string(from: first)) - \(Self.shortDateFormatter.string(from: last))"
+        return "Неделя: \(range)"
     }
 
     private var chartSubtitle: String {
-        period == .month ? "Календарный месяц, с 1 числа" : "Последние 7 дней, включая сегодня"
+        "Понедельник - воскресенье"
     }
 
     private var todayZoneColor: NSColor {
         guard WarningSettings.isEnabled else { return metric.color }
         let minutes = todaySec / 60
-        if minutes >= red { return Self.zoneRed }
-        if minutes >= yellow { return Self.zoneYellow }
-        return Self.zoneGreen
+        if minutes >= red { return GovorunTheme.red }
+        if minutes >= yellow { return GovorunTheme.amber }
+        return GovorunTheme.green
     }
 
     private func refresh() {
-        days = period.load()
+        days = SessionStats.currentWeekDays()
         todayW = SessionStats.wordCountToday
         todayS = SessionStats.sessionCountToday
         todaySec = SessionStats.secondsToday
         ydayW = SessionStats.wordCountYesterday
         ydayS = SessionStats.sessionCountYesterday
         ydaySec = SessionStats.secondsYesterday
+        let week = SessionStats.currentWeekStat
+        weekW = week.words
+        weekS = week.sessions
+        weekSec = week.seconds
         allW = SessionStats.wordCount
         allS = SessionStats.sessionCount
         allSec = SessionStats.secondsTotal
@@ -289,22 +323,41 @@ struct StatsView: View {
     }
 
     private func xAxisLabel(for date: Date, index: Int) -> String {
-        switch period {
-        case .week:
-            return Self.weekdayFormatter.string(from: date)
-        case .month:
-            let day = Calendar.current.component(.day, from: date)
-            let isLast = index == days.count - 1
-            return day == 1 || day % 5 == 0 || isLast ? "\(day)" : ""
-        }
+        Self.weekdayFormatter.string(from: date)
     }
 
     private func sessionsText(_ value: Int) -> String {
         "\(value) \(plural(value, one: "сессия", few: "сессии", many: "сессий"))"
     }
 
+    private func wordsText(_ value: Int) -> String {
+        "\(value) \(plural(value, one: "слово", few: "слова", many: "слов"))"
+    }
+
     private func minutesText(_ seconds: Int) -> String {
         "\(seconds / 60) мин"
+    }
+
+    private func summaryValue(words: Int, sessions: Int, seconds: Int) -> Int {
+        switch metric {
+        case .words:
+            return words
+        case .minutes:
+            return seconds / 60
+        case .sessions:
+            return sessions
+        }
+    }
+
+    private func summaryDetail(_ item: SummaryItem) -> String {
+        switch metric {
+        case .words:
+            return "\(sessionsText(item.sessions)) • \(minutesText(item.seconds))"
+        case .minutes:
+            return "\(wordsText(item.words)) • \(sessionsText(item.sessions))"
+        case .sessions:
+            return "\(wordsText(item.words)) • \(minutesText(item.seconds))"
+        }
     }
 
     private func plural(_ value: Int, one: String, few: String, many: String) -> String {
@@ -315,9 +368,8 @@ struct StatsView: View {
         return many
     }
 
-    fileprivate static let zoneGreen = NSColor(calibratedRed: 0.18, green: 0.56, blue: 0.34, alpha: 1)
-    fileprivate static let zoneYellow = NSColor(calibratedRed: 0.82, green: 0.48, blue: 0.10, alpha: 1)
-    fileprivate static let zoneRed = NSColor(calibratedRed: 0.82, green: 0.18, blue: 0.20, alpha: 1)
+    fileprivate static let zoneYellow = GovorunTheme.amber
+    fileprivate static let zoneRed = GovorunTheme.red
 
     private static let shortDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -337,6 +389,7 @@ struct StatsView: View {
 private struct SummaryTile: View {
     let title: String
     let value: Int
+    let unit: String
     let detail: String
     let accent: NSColor
 
@@ -352,11 +405,18 @@ private struct SummaryTile: View {
                     .lineLimit(1)
             }
 
-            Text(value.formatted())
-                .font(.system(size: 21, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.62)
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(value.formatted())
+                    .font(.system(size: 21, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.62)
+                Text(unit)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
 
             Text(detail)
                 .font(.system(size: 10))
@@ -366,11 +426,7 @@ private struct SummaryTile: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-        )
+        .govorunSurface()
     }
 }
 

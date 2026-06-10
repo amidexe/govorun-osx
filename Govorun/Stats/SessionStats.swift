@@ -78,28 +78,35 @@ enum SessionStats {
 
     // MARK: - Chart data
 
-    /// Последние `n` дней (включая сегодня), с заполнением нулями. Старые → новые.
-    static func lastDays(_ n: Int) -> [(date: Date, stat: DayStat)] {
+    /// Текущая календарная неделя: понедельник → воскресенье.
+    static func currentWeekDays() -> [(date: Date, stat: DayStat)] {
         let hist = loadHistory()
-        let cal  = Calendar.current
+        let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
-        return (0..<n).reversed().map { offset in
-            let day = cal.date(byAdding: .day, value: -offset, to: today) ?? today
+        let monday = weekStart(for: today, calendar: cal)
+
+        return (0..<7).map { offset in
+            let day = cal.date(byAdding: .day, value: offset, to: monday) ?? monday
             return (day, hist[key(for: day)] ?? DayStat())
         }
     }
 
-    /// Текущий календарный месяц: с 1-го числа по сегодня, старые → новые.
-    static func currentMonthDays() -> [(date: Date, stat: DayStat)] {
-        let hist = loadHistory()
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        let start = cal.dateInterval(of: .month, for: today)?.start ?? today
-        let dayCount = (cal.dateComponents([.day], from: start, to: today).day ?? 0) + 1
+    static func weekStart(for date: Date, calendar: Calendar = .current) -> Date {
+        let day = calendar.startOfDay(for: date)
+        let weekday = calendar.component(.weekday, from: day)
+        let daysFromMonday = (weekday + 5) % 7
+        return calendar.date(byAdding: .day, value: -daysFromMonday, to: day) ?? day
+    }
 
-        return (0..<dayCount).map { offset in
-            let day = cal.date(byAdding: .day, value: offset, to: start) ?? start
-            return (day, hist[key(for: day)] ?? DayStat())
+    static var currentWeekStat: DayStat {
+        aggregate(currentWeekDays())
+    }
+
+    private static func aggregate(_ days: [(date: Date, stat: DayStat)]) -> DayStat {
+        days.reduce(into: DayStat()) { result, item in
+            result.sessions += item.stat.sessions
+            result.words += item.stat.words
+            result.seconds += item.stat.seconds
         }
     }
 

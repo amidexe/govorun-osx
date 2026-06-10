@@ -10,7 +10,7 @@ enum WarningSettings {
         get { d.bool(forKey: "warningsEnabled") }
         set { d.set(newValue, forKey: "warningsEnabled") }
     }
-    // Зоны усталости — по минутам речи за день (устаёшь от времени, а не от числа нажатий).
+    // Напоминание об отдыхе считается по минутам речи за день.
     static var yellowMinutes: Int {
         get { let v = d.integer(forKey: "warningYellowMin"); return v == 0 ? 60 : v }
         set { d.set(newValue, forKey: "warningYellowMin") }
@@ -40,13 +40,13 @@ struct VoiceZonesInfoView: View {
             HStack(spacing: 10) {
                 Image(systemName: "waveform.path.ecg")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color(red: 0.18, green: 0.42, blue: 0.92))
+                    .foregroundStyle(Color(nsColor: GovorunTheme.blue))
                     .frame(width: 28, height: 28)
-                    .background(Color(red: 0.18, green: 0.42, blue: 0.92).opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(Color(nsColor: GovorunTheme.blue).opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Зоны нагрузки")
+                    Text("Напоминание об отдыхе")
                         .font(.system(size: 15, weight: .semibold))
-                    Text("Ориентир по суммарному времени речи за день")
+                    Text("По суммарному времени речи за день")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -62,38 +62,39 @@ struct VoiceZonesInfoView: View {
                 .keyboardShortcut(.cancelAction)
             }
 
-            Text("Усталость и внимание зависят от времени речи за день, а не от числа диктовок. Зоны помогают заметить момент, когда лучше сделать паузу.")
+            Text("Говорун считает минуты речи за день и меняет цвет птички, когда пора сделать паузу.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(spacing: 8) {
                 ZoneInfoRow(
-                    color: Color(red: 0.18, green: 0.56, blue: 0.34),
-                    title: "Норма",
+                    color: Color(nsColor: GovorunTheme.green),
+                    title: "Спокойно",
                     range: "до \(yellow) мин",
-                    detail: "Комфортная зона: силы и внимание остаются свежими."
+                    detail: "Можно продолжать в обычном темпе."
                 )
                 ZoneInfoRow(
-                    color: Color(red: 0.82, green: 0.48, blue: 0.10),
+                    color: Color(nsColor: GovorunTheme.amber),
                     title: "Пора на паузу",
                     range: "\(yellow)-\(red) мин",
-                    detail: "Усталость копится, формулировки начинают даваться тяжелее."
+                    detail: "Лучше ненадолго отойти и вернуться к диктовке позже."
                 )
                 ZoneInfoRow(
-                    color: Color(red: 0.82, green: 0.18, blue: 0.20),
+                    color: Color(nsColor: GovorunTheme.red),
                     title: "Нужен отдых",
                     range: "\(red)+ мин",
-                    detail: "Рабочая память перегружена, лучше восстановиться перед новой диктовкой."
+                    detail: "Диктовок за день уже много, стоит сделать настоящий перерыв."
                 )
             }
 
-            Text("Пороги остаются вашими настройками: принцип общий, цифры лучше подобрать под собственный темп.")
+            Text("Пороги можно настроить под свой темп.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
         }
         .padding(16)
         .frame(width: 380)
+        .background(GovorunTheme.pageBackground)
         .onAppear {
             yellow = WarningSettings.yellowMinutes
             red = WarningSettings.redMinutes
@@ -133,7 +134,7 @@ private struct ZoneInfoRow: View {
             }
         }
         .padding(10)
-        .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(GovorunTheme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(color.opacity(0.18), lineWidth: 1)

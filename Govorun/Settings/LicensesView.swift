@@ -5,51 +5,91 @@ struct LicensesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Лицензии").font(.headline)
-                Spacer()
-                Button("Закрыть") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
+            GovorunSheetHeader(
+                title: "Лицензии",
+                subtitle: "Сторонние компоненты и исходный код",
+                systemImage: "scroll"
+            ) {
+                GovorunCloseButton { dismiss() }
             }
-            .padding()
 
             Divider()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 10) {
                     ForEach(License.all, id: \.name) { lic in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Text(lic.name).font(.headline)
-                                Text(lic.spdx)
-                                    .font(.caption)
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
-                                Spacer()
-                                Link(lic.url, destination: URL(string: lic.url)!)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Text(lic.copyright)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Divider()
+                        LicenseRow(license: lic)
                     }
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Говорун для macOS").font(.headline)
-                        Text("MIT License — Copyright (c) 2025 amidexe")
-                            .font(.caption).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Text("Говорун для macOS")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("MIT")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            Spacer(minLength: 0)
+                        }
+                        Text("Copyright (c) 2026 amidexe")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
                         Link("https://github.com/amidexe/govorun-osx",
                              destination: URL(string: "https://github.com/amidexe/govorun-osx")!)
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
                     }
+                    .padding(12)
+                    .govorunSurface()
                 }
-                .padding()
+                .padding(16)
             }
         }
-        .frame(width: 520, height: 420)
+        .frame(width: 560, height: 480)
+        .background(GovorunTheme.pageBackground)
+    }
+}
+
+private struct LicenseRow: View {
+    let license: License
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(license.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+
+                Text(license.spdx)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+                Spacer(minLength: 0)
+
+                Link(destination: URL(string: license.url)!) {
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help(license.url)
+            }
+
+            Text(license.copyright)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .govorunSurface()
     }
 }
 

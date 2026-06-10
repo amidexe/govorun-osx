@@ -8,6 +8,17 @@ struct WordReplacement: Codable, Identifiable {
 
 enum WordDictionary {
     private static let key = "wordDictionary"
+    private static let enabledKey = "wordDictionaryEnabled"
+
+    static var isEnabled: Bool {
+        get {
+            guard UserDefaults.standard.object(forKey: enabledKey) != nil else { return true }
+            return UserDefaults.standard.bool(forKey: enabledKey)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: enabledKey)
+        }
+    }
 
     static var entries: [WordReplacement] {
         get {
@@ -72,6 +83,7 @@ enum WordDictionary {
 
     // MARK: - Применяется к тексту до LLM
     static func apply(to text: String) -> String {
+        guard isEnabled else { return text }
         var result = text
         for entry in entries {
             let patterns = entry.from
