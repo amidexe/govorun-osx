@@ -50,6 +50,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        // Сторож главного потока: если UI зависнет (напр. layout-loop SwiftUI),
+        // приложение самозавершится, а не будет жечь CPU/батарею часами.
+        MainThreadWatchdog.shared.start()
         LLMSettings.migrateKeysToKeychain()
         setupMenuBar()
         floatingWindowController = FloatingWindowController()

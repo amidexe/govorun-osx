@@ -219,12 +219,12 @@ struct SettingsView: View {
                             if llmModels.isEmpty {
                                 Text(llmModel.isEmpty ? "–" : llmModel)
                                     .foregroundStyle(llmModel.isEmpty ? .secondary : .primary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Spacer(minLength: 0)
                             } else {
                                 Picker("", selection: $llmModel) {
                                     ForEach(llmModels, id: \.self) { Text($0).tag($0) }
                                 }
-                                .labelsHidden().frame(maxWidth: .infinity)
+                                .labelsHidden()
                                 .onChange(of: llmModel) { v in guard !v.isEmpty else { return }; LLMSettings.model = v }
                             }
                             Button { loadModels() } label: {
