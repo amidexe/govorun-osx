@@ -4,6 +4,8 @@ import SwiftUI
 @MainActor
 final class FloatingWindowController: NSWindowController {
 
+    private let visibility = RecorderVisibility()
+
     convenience init() {
         let s = FloatingRecorderView.size
 
@@ -22,7 +24,7 @@ final class FloatingWindowController: NSWindowController {
 
         self.init(window: panel)
 
-        let view = FloatingRecorderView()
+        let view = FloatingRecorderView(visibility: visibility)
         let hosting = NSHostingView(rootView: view)
         hosting.autoresizingMask = [.width, .height]
         hosting.wantsLayer = true
@@ -34,6 +36,7 @@ final class FloatingWindowController: NSWindowController {
 
     func show() {
         NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
+        visibility.isActive = true          // запускает pulse-анимацию
         positionPanel()
         window?.alphaValue = 0
         window?.orderFront(nil)
@@ -49,6 +52,7 @@ final class FloatingWindowController: NSWindowController {
             window?.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             self?.window?.orderOut(nil)
+            self?.visibility.isActive = false   // останавливает pulse — нет фоновой нагрузки
         })
     }
 

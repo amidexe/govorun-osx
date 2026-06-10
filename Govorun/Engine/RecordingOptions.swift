@@ -1,10 +1,60 @@
 import CoreAudio
 import Foundation
+import AppKit
 
 enum RecordingOptions {
     static var muteAudioDuringRecording: Bool {
         get { UserDefaults.standard.bool(forKey: "muteAudioDuringRecording") }
         set { UserDefaults.standard.set(newValue, forKey: "muteAudioDuringRecording") }
+    }
+
+    /// Максимальная длительность одной записи в минутах. 0 = без ограничения.
+    /// По достижении запись автоматически останавливается и распознаётся.
+    static var maxRecordingMinutes: Int {
+        get { let v = UserDefaults.standard.object(forKey: "maxRecordingMinutes"); return (v as? Int) ?? 5 }
+        set { UserDefaults.standard.set(newValue, forKey: "maxRecordingMinutes") }
+    }
+
+    /// Короткий звук на старте и завершении записи — чтобы на слух понимать,
+    /// включена запись или нет (часто забывается выключенной).
+    static var playRecordingSounds: Bool {
+        get { UserDefaults.standard.object(forKey: "playRecordingSounds") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "playRecordingSounds") }
+    }
+}
+
+/// Звук-индикатор записи: мягкий щелчок на базе «Tink» — обрезан по хвосту,
+/// громкость 70%. Старт — 1 щелчок, стоп — 2 одинаковых щелчка («тук-тук»).
+enum RecordingSound {
+    // Держим NSSound в статике: временный NSSound(named:) освобождается до конца
+    // воспроизведения — отсюда «иногда играет, иногда нет». Громкость −30%.
+    private static let sound: NSSound? = {
+        let s = NSSound(named: "Tink")
+        s?.volume = 0.7
+        return s
+    }()
+    private static let clipLength = 0.14   // обрезаем звонкий хвост → мягкий щелчок
+
+    static func playStart() {
+        guard RecordingOptions.playRecordingSounds else { return }
+        click()
+    }
+
+    static func playStop() {
+        guard RecordingOptions.playRecordingSounds else { return }
+        click()
+        // Оба щелчка обрезаются до clipLength → одинаково мягкие, симметричное «тук-тук».
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) { click() }
+    }
+
+    // Играем щелчок и через clipLength обрываем — чтобы не звенел длинный хвост.
+    private static func click() {
+        guard let s = sound else { return }
+        s.stop()
+        s.play()
+        DispatchQueue.main.asyncAfter(deadline: .now() + clipLength) {
+            if s.isPlaying { s.stop() }
+        }
     }
 }
 

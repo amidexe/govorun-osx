@@ -10,19 +10,20 @@ enum WarningSettings {
         get { d.bool(forKey: "warningsEnabled") }
         set { d.set(newValue, forKey: "warningsEnabled") }
     }
-    static var yellowSessions: Int {
-        get { let v = d.integer(forKey: "warningYellow"); return v == 0 ? 50 : v }
-        set { d.set(newValue, forKey: "warningYellow") }
+    // Зоны усталости — по минутам речи за день (устаёшь от времени, а не от числа нажатий).
+    static var yellowMinutes: Int {
+        get { let v = d.integer(forKey: "warningYellowMin"); return v == 0 ? 60 : v }
+        set { d.set(newValue, forKey: "warningYellowMin") }
     }
-    static var redSessions: Int {
-        get { let v = d.integer(forKey: "warningRed"); return v == 0 ? 80 : v }
-        set { d.set(newValue, forKey: "warningRed") }
+    static var redMinutes: Int {
+        get { let v = d.integer(forKey: "warningRedMin"); return v == 0 ? 90 : v }
+        set { d.set(newValue, forKey: "warningRedMin") }
     }
 
-    static func zone(sessions: Int) -> WarningZone {
+    static func zone(minutes: Int) -> WarningZone {
         guard isEnabled else { return .green }
-        if sessions >= redSessions    { return .red }
-        if sessions >= yellowSessions { return .yellow }
+        if minutes >= redMinutes    { return .red }
+        if minutes >= yellowMinutes { return .yellow }
         return .green
     }
 }
@@ -31,8 +32,8 @@ enum WarningSettings {
 
 struct VoiceZonesInfoView: View {
     @Environment(\.dismiss) var dismiss
-    @State private var yellow: Int = WarningSettings.yellowSessions
-    @State private var red:    Int = WarningSettings.redSessions
+    @State private var yellow: Int = WarningSettings.yellowMinutes
+    @State private var red:    Int = WarningSettings.redMinutes
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -42,12 +43,12 @@ struct VoiceZonesInfoView: View {
                 Button("Закрыть") { dismiss() }
                     .buttonStyle(.borderless).keyboardShortcut(.cancelAction)
             }
-            Text("Каждая диктовка — отдельный когнитивный акт. Их количество за день определяет нагрузку на мозг, а не время записи.")
+            Text("Усталость голоса и внимания накапливается от времени речи за день, а не от числа диктовок. Зоны считают суммарные минуты речи.")
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 4) {
-                Text("🟢  до \(yellow) сессий — продуктивная зона, мозг справляется легко")
-                Text("🟡  \(yellow)–\(red) сессий — накапливается усталость, формулировки хуже")
-                Text("🔴  \(red)+ сессий — нужен перерыв, рабочая память перегружена")
+                Text("🟢  до \(yellow) мин — продуктивная зона, голос и внимание свежие")
+                Text("🟡  \(yellow)–\(red) мин — накапливается усталость, формулировки хуже")
+                Text("🔴  \(red)+ мин — нужен перерыв, голос и рабочая память перегружены")
             }
             .font(.callout)
             .foregroundStyle(.secondary)
@@ -57,8 +58,8 @@ struct VoiceZonesInfoView: View {
         .padding(16)
         .frame(width: 360)
         .onAppear {
-            yellow = WarningSettings.yellowSessions
-            red    = WarningSettings.redSessions
+            yellow = WarningSettings.yellowMinutes
+            red    = WarningSettings.redMinutes
         }
     }
 }

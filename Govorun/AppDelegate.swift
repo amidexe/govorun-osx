@@ -47,6 +47,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Single-flight: пока идёт завершение записи + вставка, повторный вход запрещён.
     // Защищает от любой петли/наложения, которая могла бы спамить вставку.
     private var isFinishing = false
+    // Автостоп по лимиту длительности записи (RecordingOptions.maxRecordingMinutes).
+    private var maxDurationTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -288,14 +290,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startRecording() async {
         hotkeyManager.isRecording = true
         floatingWindowController?.show()
+        RecordingSound.playStart()       // до приглушения, чтобы было слышно
         audioMuter.muteIfNeeded()
         do {
             try await audioEngine.startRecording()
+            scheduleMaxDurationStop()
         } catch {
             hotkeyManager.isRecording = false
             recordingState = .idle
             audioMuter.unmuteIfNeeded()
             floatingWindowController?.hide()
+        }
+    }
+
+    // Автоматически завершает запись, если она длится дольше лимита.
+    private func scheduleMaxDurationStop() {
+        maxDurationTask?.cancel()
+        let minutes = RecordingOptions.maxRecordingMinutes
+        guard minutes > 0 else { maxDurationTask = nil; return }
+        maxDurationTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(minutes * 60))
+            guard !Task.isCancelled else { return }
+            await self?.finishRecording()
         }
     }
 
@@ -305,23 +321,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isFinishing = true
         defer { isFinishing = false }
 
+        maxDurationTask?.cancel(); maxDurationTask = nil
         hotkeyManager.isRecording = false
         let startedAt: Date? = { if case .recording(let t) = recordingState { return t }; return nil }()
         recordingState = .idle
         floatingWindowController?.hide()
         audioMuter.unmuteIfNeeded()
+        RecordingSound.playStop()        // сразу слышно, что запись остановлена
         try? await Task.sleep(for: .milliseconds(400))
         do {
             var text = try await audioEngine.stopRecording()
             text = WordDictionary.apply(to: text)
             if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let seconds = startedAt.map { Int(Date().timeIntervalSince($0)) } ?? audioEngine.speechSamples / 16000
-                let sessionsBefore = SessionStats.sessionCountToday
-                let zoneBefore = WarningSettings.zone(sessions: sessionsBefore)
+                let zoneBefore = WarningSettings.zone(minutes: SessionStats.secondsToday / 60)
                 SessionStats.record(text: text, seconds: seconds)
                 NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
-                let sessionsAfter = SessionStats.sessionCountToday
-                let zoneAfter = WarningSettings.zone(sessions: sessionsAfter)
+                let zoneAfter = WarningSettings.zone(minutes: SessionStats.secondsToday / 60)
                 if zoneAfter != zoneBefore, zoneAfter != .green {
                     showStatsPopoverAuto()
                 }
@@ -347,10 +363,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func abortRecording() async {
         if case .idle = recordingState { return }
+        maxDurationTask?.cancel(); maxDurationTask = nil
         hotkeyManager.isRecording = false
         recordingState = .idle
         _ = try? await audioEngine.stopRecording()
         audioMuter.unmuteIfNeeded()
+        RecordingSound.playStop()
         floatingWindowController?.hide()
     }
 }

@@ -21,6 +21,10 @@ final class AudioEngine: ObservableObject {
     private var vad: SileroVAD?
     private var lastPause: PauseLength = .medium
 
+    // Выгрузка модели/VAD из памяти после простоя (экономия ОЗУ + CPU в покое).
+    private var idleCleanupTask: Task<Void, Never>?
+    private let idleUnloadDelay: TimeInterval = 120
+
     // PCM window accumulator — Silero needs exactly 512 samples per call
     private var windowBuf: [Float] = []
 
@@ -37,6 +41,10 @@ final class AudioEngine: ObservableObject {
         guard state == .idle else { return }
         state = .recording
         transcribedText = ""
+
+        // Прерываем отложенную выгрузку и греем модель, пока пользователь говорит.
+        idleCleanupTask?.cancel(); idleCleanupTask = nil
+        gigaAM.preload()
 
         accumulated   = ""
         chunkResults  = [:]
@@ -116,7 +124,21 @@ final class AudioEngine: ObservableObject {
 
         state = .idle
         logger.info("Final: \(result.prefix(80))")
+        scheduleIdleCleanup()
         return result
+    }
+
+    /// После простоя выгружаем GigaAM и VAD из памяти — чтобы в покое не висели
+    /// ~500 МБ и не крутились потоки ONNX. При новой записи модель грузится снова.
+    private func scheduleIdleCleanup() {
+        idleCleanupTask?.cancel()
+        idleCleanupTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(self?.idleUnloadDelay ?? 120))
+            guard !Task.isCancelled, let self, self.state == .idle else { return }
+            self.gigaAM.unload()
+            self.vad = nil
+            self.logger.info("Idle \(Int(self.idleUnloadDelay)) c: GigaAM и VAD выгружены")
+        }
     }
 
     private func scheduleChunk(_ samples: [Float]) {

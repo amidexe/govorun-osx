@@ -22,24 +22,60 @@ enum GigaAMError: LocalizedError {
 
 final class GigaAMEngine {
     private var recognizer: OpaquePointer?
+    // Serial queue владеет recognizer: гарантирует, что выгрузка никогда не
+    // случится во время декодирования (всё — load/unload/decode — на ней).
+    private let queue = DispatchQueue(label: "com.govorun.gigaam")
     private let logger = Logger(subsystem: "com.govorun.app", category: "GigaAMEngine")
 
-    init() {
-        loadRecognizer()
-    }
+    // Модель НЕ грузится при старте приложения. Грузится по требованию
+    // (preload при старте записи / первая фраза) и выгружается после простоя
+    // (см. AudioEngine.scheduleIdleCleanup). Это убирает ~500 МБ ОЗУ и спин
+    // потоков ONNX Runtime в покое, когда диктовка не идёт.
 
     deinit {
         if let r = recognizer { SherpaOnnxDestroyOfflineRecognizer(r) }
     }
 
-    private func loadRecognizer() {
+    /// Прогреть модель заранее — чтобы первая фраза не ждала загрузку.
+    func preload() {
+        queue.async { [self] in if recognizer == nil { loadOnQueue() } }
+    }
+
+    /// Выгрузить модель из памяти (освобождает ОЗУ и гасит потоки ONNX).
+    func unload() {
+        queue.async { [self] in
+            guard let r = recognizer else { return }
+            SherpaOnnxDestroyOfflineRecognizer(r)
+            recognizer = nil
+            logger.info("GigaAM выгружена из памяти")
+        }
+    }
+
+    func transcribeSamples(_ samples: [Float]) async throws -> String {
+        guard samples.count > 1600 else { throw GigaAMError.audioTooShort }
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String, Error>) in
+            queue.async { [self] in
+                if recognizer == nil { loadOnQueue() }
+                guard let r = recognizer else { cont.resume(throwing: GigaAMError.initFailed); return }
+                do { cont.resume(returning: try Self.decode(recognizer: r, samples: samples)) }
+                catch { cont.resume(throwing: error) }
+            }
+        }
+    }
+
+    func transcribe(audioURL: URL) async throws -> String {
+        let samples = try Self.readPCM(from: audioURL)
+        return try await transcribeSamples(samples)
+    }
+
+    // Загрузка распознавателя. Вызывается ТОЛЬКО на serial queue.
+    private func loadOnQueue() {
         let dir = Self.bundledModelDir()
         let paths = ModelPaths(dir: dir)
         guard paths.areValid() else {
             logger.error("Model files missing at \(dir.path)")
             return
         }
-
         for provider in ["coreml", "cpu"] {
             if let r = createRecognizer(paths: paths, provider: provider) {
                 recognizer = r
@@ -48,19 +84,6 @@ final class GigaAMEngine {
             }
         }
         logger.error("Failed to init recognizer with any provider")
-    }
-
-    func transcribeSamples(_ samples: [Float]) async throws -> String {
-        guard let recognizer else { throw GigaAMError.initFailed }
-        guard samples.count > 1600 else { throw GigaAMError.audioTooShort }
-        return try await Task.detached(priority: .userInitiated) {
-            try Self.decode(recognizer: recognizer, samples: samples)
-        }.value
-    }
-
-    func transcribe(audioURL: URL) async throws -> String {
-        let samples = try Self.readPCM(from: audioURL)
-        return try await transcribeSamples(samples)
     }
 
     private func createRecognizer(paths: ModelPaths, provider: String) -> OpaquePointer? {
@@ -80,7 +103,7 @@ final class GigaAMEngine {
                                     cfg.model_config.transducer.decoder = dec
                                     cfg.model_config.transducer.joiner  = join
                                     cfg.model_config.tokens      = tok
-                                    cfg.model_config.num_threads = 2
+                                    cfg.model_config.num_threads = 1
                                     cfg.model_config.provider    = prov
                                     cfg.model_config.model_type  = mtype
                                     cfg.decoding_method          = dm

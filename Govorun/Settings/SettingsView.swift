@@ -15,13 +15,15 @@ struct SettingsView: View {
     @State private var hotkey:        HotkeyConfig = HotkeyConfig.stored
     @State private var cancelHotkey:  HotkeyConfig = HotkeyConfig.cancelStored ?? HotkeyConfig.defaultCancel
     @State private var muteAudio:     Bool         = RecordingOptions.muteAudioDuringRecording
+    @State private var playSounds:    Bool         = RecordingOptions.playRecordingSounds
+    @State private var maxRecMinutes: Int          = RecordingOptions.maxRecordingMinutes
     @State private var launchAtLogin: Bool         = SMAppService.mainApp.status == .enabled
     @State private var showDictionary              = false
 
-    // Warnings
+    // Warnings (зоны по минутам речи за день)
     @State private var warningsEnabled: Bool = WarningSettings.isEnabled
-    @State private var warningYellow:   Int  = WarningSettings.yellowSessions
-    @State private var warningRed:      Int  = WarningSettings.redSessions
+    @State private var warningYellow:   Int  = WarningSettings.yellowMinutes
+    @State private var warningRed:      Int  = WarningSettings.redMinutes
 
     // LLM
     @State private var llmEnabled:     Bool        = LLMSettings.isEnabled
@@ -39,6 +41,7 @@ struct SettingsView: View {
 
     // About
     @State private var showLicenses = false
+    @State private var showAbout    = false
 
     var body: some View {
         TabView {
@@ -46,10 +49,10 @@ struct SettingsView: View {
                 .tabItem { Label("Основные", systemImage: "gearshape") }
             llmTab
                 .tabItem { Label("LLM", systemImage: "sparkles") }
-            aboutTab
-                .tabItem { Label("О программе", systemImage: "info.circle") }
+            StatsView()
+                .tabItem { Label("Статистика", systemImage: "chart.bar") }
         }
-        .frame(width: 440, height: 540)
+        .frame(width: 460, height: 560)
         .onAppear {
             accessibilityGranted = AXIsProcessTrusted()
             micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
@@ -98,6 +101,16 @@ struct SettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                LabeledContent {
+                    Stepper(maxRecLabel, value: $maxRecMinutes, in: 0...180, step: 5)
+                        .onChange(of: maxRecMinutes) { RecordingOptions.maxRecordingMinutes = max(0, $0) }
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Макс. длительность записи")
+                        Text("Запись сама остановится и распознается по достижении лимита")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
 
             Section("Напоминание об отдыхе") {
@@ -111,28 +124,28 @@ struct SettingsView: View {
                 .onChange(of: warningsEnabled) { WarningSettings.isEnabled = $0 }
                 if warningsEnabled {
                     LabeledContent {
-                        Stepper("\(warningYellow) сессий", value: $warningYellow, in: 5...(warningRed - 5), step: 5)
+                        Stepper("\(warningYellow) мин", value: $warningYellow, in: 5...(warningRed - 5), step: 5)
                             .onChange(of: warningYellow) {
-                                WarningSettings.yellowSessions = $0
+                                WarningSettings.yellowMinutes = $0
                                 NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
                             }
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("🟡  Жёлтая зона от")
-                            Text("Усталость накапливается — лучше завершать начатое")
+                            Text("Минут речи за день, после которых копится усталость")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     LabeledContent {
-                        Stepper("\(warningRed) сессий", value: $warningRed, in: (warningYellow + 5)...9999, step: 5)
+                        Stepper("\(warningRed) мин", value: $warningRed, in: (warningYellow + 5)...600, step: 5)
                             .onChange(of: warningRed) {
-                                WarningSettings.redSessions = $0
+                                WarningSettings.redMinutes = $0
                                 NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
                             }
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("🔴  Красная зона от")
-                            Text("Слишком много за день — возьми паузу")
+                            Text("Слишком много речи за день — возьми паузу")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -140,6 +153,8 @@ struct SettingsView: View {
             }
 
             Section("Система") {
+                Toggle("Звук начала и конца записи", isOn: $playSounds)
+                    .onChange(of: playSounds) { RecordingOptions.playRecordingSounds = $0 }
                 Toggle("Приглушить звук при записи", isOn: $muteAudio)
                     .onChange(of: muteAudio) { RecordingOptions.muteAudioDuringRecording = $0 }
                 Toggle("Запускать при входе в систему", isOn: $launchAtLogin)
@@ -156,9 +171,22 @@ struct SettingsView: View {
                 PermissionRow(granted: micGranted, label: "Микрофон",
                               url: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
             }
+
+            Section {
+                LabeledContent {
+                    Button("Открыть…") { showAbout = true }
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("О программе")
+                        Text("Версия, автор, приватность, лицензии")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .onTapGesture { NSApp.keyWindow?.makeFirstResponder(nil) }
+        .sheet(isPresented: $showAbout) { aboutSheet }
     }
 
     // MARK: - Таб «LLM»
@@ -282,7 +310,22 @@ struct SettingsView: View {
         .onTapGesture { NSApp.keyWindow?.makeFirstResponder(nil) }
     }
 
-    // MARK: - Таб «О программе»
+    // MARK: - «О программе» (sheet из «Основных»)
+
+    private var aboutSheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("О программе").font(.headline)
+                Spacer()
+                Button("Закрыть") { showAbout = false }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            Divider()
+            aboutTab
+        }
+        .frame(width: 440, height: 470)
+    }
 
     private var aboutTab: some View {
         Form {
@@ -360,6 +403,9 @@ struct SettingsView: View {
         case .medium: return "1 с"
         case .long:   return "2 с"
         }
+    }
+    private var maxRecLabel: String {
+        maxRecMinutes == 0 ? "∞ без лимита" : "\(maxRecMinutes) мин"
     }
     private func incrementPause() {
         guard pauseLength != .long   else { return }
