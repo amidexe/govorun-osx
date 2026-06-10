@@ -13,7 +13,7 @@ SHERPA_TMP := sherpa-onnx-$(SHERPA_VER)-macos-xcframework-static
 GIGAAM_HF  := https://huggingface.co/istupakov/gigaam-v3-onnx/resolve/main
 SILERO_URL := https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx
 
-.PHONY: all setup setup-sherpa setup-model setup-local-signing generate build local run install test check-regressions check-install-safety smoke-settings smoke-installed monitor-resources benchmark-gigaam clean dmg github-card
+.PHONY: all setup setup-sherpa setup-model setup-local-signing generate build local run install test check-regressions check-install-safety smoke-settings smoke-installed monitor-resources benchmark-gigaam clean dmg github-card banner
 
 all: setup generate build install
 
@@ -89,6 +89,9 @@ github-card:
 		--settings "$$SETTINGS_SCREENSHOT" \
 		$${LIGHT_CARD:+--light-card "$$LIGHT_CARD"} \
 		$${DARK_CARD:+--dark-card "$$DARK_CARD"}
+
+banner:
+	python3 scripts/make_banner.py
 
 local: generate
 	@echo "==> Building Говорун (unsigned) → ~/Downloads..."

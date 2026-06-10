@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banner.svg" alt="Говорун для macOS — голосовой ввод на русском" width="100%">
+  <img src="docs/banner.svg" alt="Говорун для macOS — оффлайн-голосовой ввод на русском" width="100%">
 </p>
 
 # Говорун для macOS
