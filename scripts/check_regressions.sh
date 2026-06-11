@@ -90,6 +90,10 @@ if ! rg -q "setup-local-signing" "$ROOT/Makefile"; then
     fail "Makefile should expose setup-local-signing for stable local TCC identity"
 fi
 
+if ! rg -q "lastTick|resetAfterTimerSuspension|GOVORUN_WATCHDOG_SLEEP_SELFTEST|sleep/wake" "$ROOT/Govorun/Watchdog/MainThreadWatchdog.swift"; then
+    fail "watchdog should reset after long timer suspension so sleep/wake is not treated as a UI hang"
+fi
+
 if ! rg -q "Govorun Local Development|find_local_identity" "$ROOT/scripts/sign_app.sh"; then
     fail "sign_app.sh should use the stable local code-signing identity when available"
 fi
@@ -323,5 +327,6 @@ fi
 
 bash "$ROOT/scripts/check_stats_logic.sh"
 bash "$ROOT/scripts/check_keychain_logic.sh"
+bash "$ROOT/scripts/check_watchdog_sleep_logic.sh"
 
 echo "regression checks: ok"
