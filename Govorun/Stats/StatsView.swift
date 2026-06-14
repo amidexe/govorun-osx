@@ -76,6 +76,7 @@ struct StatsView: View {
     @State private var allSec = 0
     @State private var yellow = WarningSettings.yellowMinutes
     @State private var red = WarningSettings.redMinutes
+    @State private var showResetConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -90,6 +91,14 @@ struct StatsView: View {
         .background(GovorunTheme.pageBackground)
         .onAppear(perform: refresh)
         .onReceive(NotificationCenter.default.publisher(for: .statsDidUpdate)) { _ in refresh() }
+        .alert("Сбросить всю статистику?", isPresented: $showResetConfirmation) {
+            Button("Сбросить", role: .destructive) {
+                resetAllStats()
+            }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text("Будут удалены все слова, сессии, минуты речи и дневная история. Это действие нельзя отменить.")
+        }
     }
 
     private var header: some View {
@@ -209,15 +218,21 @@ struct StatsView: View {
         HStack(spacing: 6) {
             Image(systemName: "internaldrive")
                 .font(.system(size: 10, weight: .medium))
-            Text("Данные хранятся локально • графики по дневной истории \(SessionStats.historyRetentionDays) дней")
+                .foregroundStyle(.tertiary)
+            Text("Данные хранятся локально")
                 .font(.system(size: 10))
-            Spacer(minLength: 8)
-            Text("Всего: \(allW.formatted()) слов • \(allS.formatted()) сессий")
-                .font(.system(size: 10))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 12)
+            Button(role: .destructive) {
+                showResetConfirmation = true
+            } label: {
+                Label("Сбросить…", systemImage: "trash")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(Color(nsColor: GovorunTheme.red))
         }
-        .foregroundStyle(.tertiary)
     }
 
     private var summaryItems: [SummaryItem] {
@@ -320,6 +335,13 @@ struct StatsView: View {
         allSec = SessionStats.secondsTotal
         yellow = WarningSettings.yellowMinutes
         red = WarningSettings.redMinutes
+    }
+
+    private func resetAllStats() {
+        SessionStats.reset()
+        DiagnosticsLog.record("Вся статистика сброшена.", category: "Статистика")
+        refresh()
+        NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
     }
 
     private func xAxisLabel(for date: Date, index: Int) -> String {
@@ -552,7 +574,7 @@ private final class LightStatsChartView: NSView {
     private func drawBars(in rect: CGRect) {
         guard !points.isEmpty else { return }
         let step = rect.width / CGFloat(points.count)
-        let barWidth = max(2, min(points.count > 12 ? 7 : 16, step * 0.62))
+        let barWidth = max(3, min(points.count > 12 ? 8 : 22, step * 0.72))
 
         for (index, point) in points.enumerated() {
             let ratio = maxValue == 0 ? 0 : CGFloat(point.value) / CGFloat(maxValue)

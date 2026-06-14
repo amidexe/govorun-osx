@@ -115,10 +115,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
-        let resetItem = NSMenuItem(title: "Сбросить статистику за сегодня…", action: #selector(confirmResetToday), keyEquivalent: "")
-        resetItem.target = self
-        menu.addItem(resetItem)
-
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Завершить Говорун", action: #selector(NSApplication.terminate(_:)), keyEquivalent: ""))
 
@@ -216,20 +212,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let btn = statusItem.button else { return }
         NSApp.activate(ignoringOtherApps: true)
         statsPopover!.show(relativeTo: btn.bounds, of: btn, preferredEdge: .minY)
-    }
-
-    @objc private func confirmResetToday() {
-        let alert = NSAlert()
-        alert.messageText = "Сбросить статистику за сегодня?"
-        alert.informativeText = "Данные за сегодня будут удалены. Общая статистика останется."
-        alert.addButton(withTitle: "Сбросить")
-        alert.addButton(withTitle: "Отмена")
-        alert.buttons[0].hasDestructiveAction = true
-        if alert.runModal() == .alertFirstButtonReturn {
-            SessionStats.resetToday()
-            DiagnosticsLog.record("Статистика за сегодня сброшена.", category: "Статистика")
-            NotificationCenter.default.post(name: .statsDidUpdate, object: nil)
-        }
     }
 
     @objc func openSettings() {

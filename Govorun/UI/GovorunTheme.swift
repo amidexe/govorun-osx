@@ -14,6 +14,8 @@ enum GovorunTheme {
     static let green = NSColor(calibratedRed: 0.18, green: 0.56, blue: 0.34, alpha: 1)
     static let amber = NSColor(calibratedRed: 0.82, green: 0.48, blue: 0.10, alpha: 1)
     static let red = NSColor(calibratedRed: 0.82, green: 0.18, blue: 0.20, alpha: 1)
+    static let calm = NSColor.white
+    static let calmHalo = NSColor(calibratedRed: 0.95, green: 0.18, blue: 0.20, alpha: 1)
 
     private static let pageBackgroundColor = adaptive(light: 1.00, dark: 0.145)
     private static let sidebarBackgroundColor = adaptive(light: 0.965, dark: 0.115)

@@ -228,6 +228,19 @@ if rg -n "$stats_period_forbidden_pattern" \
     fail "statistics should show today/yesterday/week/all-time only; month and rolling 7 days are not part of the UI"
 fi
 
+if rg -n "historyRetentionDays|60 дней|дневной истории [0-9]+ дней|Обрезаем записи" \
+    "$ROOT/Govorun/Stats/StatsView.swift" \
+    "$ROOT/Govorun/Stats/SessionStats.swift"; then
+    fail "statistics should not imply that local totals or weekly chart data are limited to a 60-day retention window"
+fi
+
+if rg -n "resetToday|confirmResetToday|Сбросить статистику за сегодня" \
+    "$ROOT/Govorun/Stats/SessionStats.swift" \
+    "$ROOT/Govorun/Stats/StatsView.swift" \
+    "$ROOT/Govorun/AppDelegate.swift"; then
+    fail "statistics reset should be a full reset from the stats screen, not a partial today-only menu action"
+fi
+
 text_forbidden_pattern="мягк.*зон|Зоны нагрузки|дневной нагрузкой|целиком на CPU"
 if rg -n "$text_forbidden_pattern" \
     "$ROOT/Govorun" \
@@ -242,6 +255,12 @@ fi
 
 if rg -n "vadPreRoll|vadPrimed|vadSilenceGate|feedSamplesToVadWithSilenceGate" "$ROOT/Govorun/Engine/AudioEngine.swift"; then
     fail "Silero should receive the normal 16 kHz stream; do not bypass it with a custom silence gate"
+fi
+
+if rg -n "GovorunTheme\\.green|systemGreen|Color\\.green|NSColor\\.green" \
+    "$ROOT/Govorun/UI/StatsPopoverView.swift" \
+    "$ROOT/Govorun/Stats/VoiceWarnings.swift"; then
+    fail "rest reminder calm state should stay neutral/white; green is not part of the bird state palette"
 fi
 
 if ! rg -q "silero\\.threshold[[:space:]]*=[[:space:]]*0\\.5" "$ROOT/Govorun/Engine/SileroVAD.swift"; then

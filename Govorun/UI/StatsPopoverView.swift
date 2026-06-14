@@ -49,6 +49,7 @@ struct StatsPopoverView: View {
                 Image(systemName: screen.icon)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(currentAccent)
+                    .shadow(color: currentHalo, radius: currentHaloRadius)
                 Text(screen.title)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -95,6 +96,7 @@ struct StatsPopoverView: View {
             Rectangle()
                 .fill(currentAccent)
                 .frame(width: 3)
+                .shadow(color: currentHalo, radius: currentHaloRadius, x: 0, y: 0)
         }
         .animation(.easeInOut(duration: 0.18), value: screen)
         .onAppear { refresh() }
@@ -105,11 +107,20 @@ struct StatsPopoverView: View {
         HStack(spacing: 4) {
             ForEach(Screen.allCases, id: \.rawValue) { item in
                 Circle()
-                    .fill(item == screen ? currentAccent : Color.secondary.opacity(0.22))
+                    .fill(pageDotColor(for: item))
                     .frame(width: item == screen ? 6 : 4, height: item == screen ? 6 : 4)
+                    .shadow(
+                        color: item == screen ? currentHalo : .clear,
+                        radius: item == screen ? currentHaloRadius : 0
+                    )
             }
         }
         .frame(width: 36, alignment: .trailing)
+    }
+
+    private func pageDotColor(for item: Screen) -> Color {
+        if item == screen { return currentAccent }
+        return isCalmToday ? Color(nsColor: GovorunTheme.calm).opacity(0.22) : Color.secondary.opacity(0.22)
     }
 
     private var currentWords: Int {
@@ -144,12 +155,35 @@ struct StatsPopoverView: View {
         return todayZoneColor
     }
 
+    private var currentHalo: Color {
+        isCalmToday ? Color(nsColor: GovorunTheme.calmHalo).opacity(0.34) : .clear
+    }
+
+    private var currentHaloRadius: CGFloat {
+        isCalmToday ? 3 : 0
+    }
+
+    private var isCalmToday: Bool {
+        screen == .today && todayZone == .green
+    }
+
     private var todayZoneColor: Color {
-        guard WarningSettings.isEnabled else { return Color(nsColor: GovorunTheme.blue) }
+        switch todayZone {
+        case .green:
+            return Color(nsColor: GovorunTheme.calm)
+        case .yellow:
+            return Color(nsColor: GovorunTheme.amber)
+        case .red:
+            return Color(nsColor: GovorunTheme.red)
+        }
+    }
+
+    private var todayZone: WarningZone {
+        guard WarningSettings.isEnabled else { return .green }
         let minutes = secondsToday / 60
-        if minutes >= redThreshold { return Color(nsColor: GovorunTheme.red) }
-        if minutes >= yellowThreshold { return Color(nsColor: GovorunTheme.amber) }
-        return Color(nsColor: GovorunTheme.green)
+        if minutes >= redThreshold { return .red }
+        if minutes >= yellowThreshold { return .yellow }
+        return .green
     }
 
     private func cycleScreen() {

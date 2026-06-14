@@ -69,7 +69,8 @@ struct VoiceZonesInfoView: View {
 
             VStack(spacing: 8) {
                 ZoneInfoRow(
-                    color: Color(nsColor: GovorunTheme.green),
+                    color: Color(nsColor: GovorunTheme.calm),
+                    halo: Color(nsColor: GovorunTheme.calmHalo).opacity(0.24),
                     title: "Спокойно",
                     range: "до \(yellow) мин",
                     detail: "Можно продолжать в обычном темпе."
@@ -104,6 +105,7 @@ struct VoiceZonesInfoView: View {
 
 private struct ZoneInfoRow: View {
     let color: Color
+    var halo: Color = .clear
     let title: String
     let range: String
     let detail: String
@@ -113,6 +115,7 @@ private struct ZoneInfoRow: View {
             Circle()
                 .fill(color)
                 .frame(width: 8, height: 8)
+                .shadow(color: halo, radius: 3)
                 .padding(.top, 6)
 
             VStack(alignment: .leading, spacing: 3) {
@@ -125,6 +128,7 @@ private struct ZoneInfoRow: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(color.opacity(0.12), in: Capsule())
+                        .shadow(color: halo, radius: 2)
                     Spacer(minLength: 0)
                 }
                 Text(detail)
@@ -138,6 +142,7 @@ private struct ZoneInfoRow: View {
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(color.opacity(0.18), lineWidth: 1)
+                .shadow(color: halo, radius: 3)
         )
     }
 }

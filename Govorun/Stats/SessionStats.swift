@@ -25,11 +25,9 @@ enum SessionStats {
         set { d.set(newValue, forKey: "statsSeconds") }
     }
 
-    // MARK: - Daily history (источник для «сегодня», «вчера», графика)
+    // MARK: - Daily history (источник для «сегодня», «вчера», текущей недели)
 
     private static let historyKey  = "statsDailyHistory"
-    static let historyRetentionDays = 60
-    private static let historyDays = historyRetentionDays
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter()
@@ -53,10 +51,7 @@ enum SessionStats {
     }
 
     private static func saveHistory(_ dict: [String: DayStat]) {
-        // Обрезаем записи старше historyDays
-        let cutoff = key(for: Calendar.current.date(byAdding: .day, value: -historyDays, to: Date()) ?? Date())
-        let pruned = dict.filter { $0.key >= cutoff }
-        if let data = try? JSONEncoder().encode(pruned) {
+        if let data = try? JSONEncoder().encode(dict) {
             d.set(data, forKey: historyKey)
         }
     }
@@ -125,12 +120,6 @@ enum SessionStats {
         day.words    += words
         day.seconds  += seconds
         hist[todayKey] = day
-        saveHistory(hist)
-    }
-
-    static func resetToday() {
-        var hist = loadHistory()
-        hist[todayKey] = nil
         saveHistory(hist)
     }
 
