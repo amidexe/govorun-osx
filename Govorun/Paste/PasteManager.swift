@@ -2,7 +2,11 @@ import AppKit
 import CoreGraphics
 
 enum PasteManager {
-    static func paste(_ text: String) {
+    static let syntheticEventSuppressionSeconds = 0.6
+
+    private static let eventDeliveryDelay: Duration = .milliseconds(350)
+
+    static func paste(_ text: String) async {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(text, forType: .string)
@@ -22,5 +26,9 @@ enum PasteManager {
         vDown?.post(tap: .cghidEventTap)
         vUp?.post(tap: .cghidEventTap)
         cmdUp?.post(tap: .cghidEventTap)
+
+        // CGEvent posting returns before the foreground app necessarily consumes
+        // the pasteboard. Keep queued dictation snippets from replacing it too soon.
+        try? await Task.sleep(for: eventDeliveryDelay)
     }
 }

@@ -344,6 +344,14 @@ if ! rg -q "suppressSyntheticPasteEvents" "$ROOT/Govorun/AppDelegate.swift" "$RO
     fail "paste path should suppress synthetic Cmd+V events without disabling the hotkey tap"
 fi
 
+if ! grep -q "await PasteManager.paste" <<< "$process_body"; then
+    fail "queued recognition should wait briefly after paste so later snippets do not overwrite the pasteboard too early"
+fi
+
+if ! rg -q "LLM вернул пустой текст" "$ROOT/Govorun/AppDelegate.swift"; then
+    fail "empty LLM responses should fall back to recognized text instead of dropping the dictation"
+fi
+
 bash "$ROOT/scripts/check_stats_logic.sh"
 bash "$ROOT/scripts/check_keychain_logic.sh"
 bash "$ROOT/scripts/check_watchdog_sleep_logic.sh"

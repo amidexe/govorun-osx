@@ -430,13 +430,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let recognitionStartedAt = CFAbsoluteTimeGetCurrent()
-        var text = await audioEngine.recognize(job)
+        let recognizedText = await audioEngine.recognize(job)
         let recognitionMs = Int((CFAbsoluteTimeGetCurrent() - recognitionStartedAt) * 1000)
         DiagnosticsLog.record(
             "Распознавание завершено: \(formatMilliseconds(recognitionMs)), \(job.chunkCount) фрагм.",
             category: "Распознавание"
         )
-        text = WordDictionary.apply(to: text)
+        var text = WordDictionary.apply(to: recognizedText)
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             DiagnosticsLog.record("Распознавание вернуло пустой текст.", category: "Распознавание", level: .warning)
             return
@@ -459,10 +459,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 do {
                     let llmStartedAt = CFAbsoluteTimeGetCurrent()
-                    text = try await LLMCorrector.shared.correct(text)
+                    let correctedText = try await LLMCorrector.shared.correct(text)
                     let llmMs = Int((CFAbsoluteTimeGetCurrent() - llmStartedAt) * 1000)
                     updateLLMStatus(nil)
-                    DiagnosticsLog.record("LLM-стилизация выполнена: \(formatMilliseconds(llmMs)).", category: "LLM")
+                    if correctedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        DiagnosticsLog.record(
+                            "LLM вернул пустой текст, вставляю распознанный вариант.",
+                            category: "LLM",
+                            level: .warning
+                        )
+                    } else {
+                        text = correctedText
+                        DiagnosticsLog.record("LLM-стилизация выполнена: \(formatMilliseconds(llmMs)).", category: "LLM")
+                    }
                 } catch {
                     updateLLMStatus(error.localizedDescription)
                     DiagnosticsLog.record(error.localizedDescription, category: "LLM", level: .error)
@@ -471,8 +480,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
-        hotkeyManager.suppressSyntheticPasteEvents()
-        PasteManager.paste(text + " ")
+        hotkeyManager.suppressSyntheticPasteEvents(seconds: PasteManager.syntheticEventSuppressionSeconds)
+        await PasteManager.paste(text + " ")
         DiagnosticsLog.record("Текст скопирован в буфер и вставлен.", category: "Вставка")
     }
 
