@@ -18,6 +18,7 @@ final class HotkeyManager {
     nonisolated(unsafe) private var cancelCfg:     HotkeyConfig = HotkeyConfig.cancelStored ?? HotkeyConfig.defaultCancel
     nonisolated(unsafe) private var modifierIsDown = false
     nonisolated(unsafe) private var modifierPressedAt: UInt64?
+    nonisolated(unsafe) private var modifierReleasedAt: UInt64?
     nonisolated(unsafe) private var ignoreEventsUntil: UInt64 = 0
     nonisolated(unsafe) private var suppressPasteEventsUntil: UInt64 = 0
     // True, пока проглочен keyDown нашего хоткея-клавиши и ещё не пришёл парный keyUp.
@@ -28,6 +29,7 @@ final class HotkeyManager {
     nonisolated(unsafe) var isRecording = false
 
     nonisolated private static let modifierInterruptionWindowNanos: UInt64 = 1_000_000_000
+    nonisolated private static let modifierBounceWindowNanos: UInt64 = 120_000_000
 
     var isActive: Bool { eventTap != nil }
 
@@ -36,6 +38,7 @@ final class HotkeyManager {
         cancelCfg = HotkeyConfig.cancelStored ?? HotkeyConfig.defaultCancel
         modifierIsDown = false
         modifierPressedAt = nil
+        modifierReleasedAt = nil
         keyHotkeyDown = false
     }
 
@@ -82,6 +85,7 @@ final class HotkeyManager {
         }
         modifierIsDown = false
         modifierPressedAt = nil
+        modifierReleasedAt = nil
         keyHotkeyDown = false
     }
 
@@ -92,6 +96,7 @@ final class HotkeyManager {
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
         modifierIsDown = false
         modifierPressedAt = nil
+        modifierReleasedAt = nil
         armAfterTapChange(seconds: 0.3)
         // keyHotkeyDown НЕ сбрасываем здесь: если клавиша ещё зажата, тап
         // продолжит глотать автоповтор. Флаг обнулится сам, когда придёт keyUp.
@@ -121,6 +126,7 @@ final class HotkeyManager {
         if DispatchTime.now().uptimeNanoseconds < ignoreEventsUntil {
             modifierIsDown = false
             modifierPressedAt = nil
+            modifierReleasedAt = nil
             keyHotkeyDown = false
             return Unmanaged.passUnretained(event)
         }
@@ -184,6 +190,7 @@ final class HotkeyManager {
                 if shouldAbortModifierShortcutForChord() {
                     modifierIsDown = false
                     modifierPressedAt = nil
+                    modifierReleasedAt = nil
                     Task { @MainActor in self.onKeyAborted?() }
                 }
             }
@@ -199,14 +206,23 @@ final class HotkeyManager {
         if !modifierIsDown {
             guard kc == cfg.keyCode else { return Unmanaged.passUnretained(event) }
             guard cgFlags.contains(expected) else { return Unmanaged.passUnretained(event) }
+            let now = DispatchTime.now().uptimeNanoseconds
+            if let modifierReleasedAt,
+               now - modifierReleasedAt < Self.modifierBounceWindowNanos {
+                return nil
+            }
             modifierIsDown = true
-            modifierPressedAt = DispatchTime.now().uptimeNanoseconds
+            modifierPressedAt = now
             Task { @MainActor in self.onKeyDown?() }
             return nil
         } else {
             if kc == cfg.keyCode {
+                guard !cgFlags.contains(expected) else {
+                    return nil
+                }
                 modifierIsDown = false
                 modifierPressedAt = nil
+                modifierReleasedAt = DispatchTime.now().uptimeNanoseconds
                 Task { @MainActor in self.onKeyUp?() }
                 return nil
             }
@@ -228,8 +244,12 @@ final class HotkeyManager {
     }
 
     nonisolated private func isSyntheticPasteEvent(type: CGEventType, event: CGEvent) -> Bool {
-        guard type == .keyDown || type == .keyUp else { return false }
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-        return keyCode == 0x37 || keyCode == 0x09
+        let isCommand = keyCode == 0x37
+        if type == .flagsChanged {
+            return isCommand
+        }
+        guard type == .keyDown || type == .keyUp else { return false }
+        return isCommand || keyCode == 0x09
     }
 }

@@ -46,8 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     private var recordingState: RecordingState = .idle
     private let pttThreshold: TimeInterval = 0.35
-    // Защищает только короткий момент остановки аудиосессии. Распознавание и
-    // вставка идут отдельно, чтобы следующую фразу можно было начать сразу.
+    // Защищает короткий момент остановки аудиосессии.
     private var isStoppingRecording = false
     private var recognitionTail: Task<Void, Never>?
     private var queuedRecognitionJobs = 0
@@ -470,7 +469,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showStatsPopoverAuto()
         }
         if LLMSettings.isEnabled {
-            if let configurationError = LLMSettings.apiKeyConfigurationError() {
+            if text.count < LLMSettings.minLength {
+                updateLLMStatus(nil)
+            } else if let configurationError = LLMSettings.apiKeyConfigurationError() {
                 updateLLMStatus(configurationError.localizedDescription)
                 DiagnosticsLog.record(configurationError.localizedDescription, category: "LLM", level: .warning)
             } else {
