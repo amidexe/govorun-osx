@@ -55,11 +55,8 @@ final class FloatingWindowController: NSWindowController {
 
     private func positionPanel() {
         guard let screen = NSScreen.main, let w = window else { return }
-        let frame = screen.visibleFrame
-        let wSize = w.frame.size
-        let x = frame.midX - wSize.width / 2
-        let y = frame.minY + 24
-        w.setFrameOrigin(NSPoint(x: x, y: y))
+        let origin = FloatingPanelPositioning.bottomCenterOrigin(windowSize: w.frame.size, on: screen)
+        w.setFrameOrigin(origin)
     }
 
     private func installContentIfNeeded() {

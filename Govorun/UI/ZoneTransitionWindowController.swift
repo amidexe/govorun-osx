@@ -59,12 +59,9 @@ final class ZoneTransitionWindowController: NSWindowController {
 
     private func positionPanel() {
         guard let screen = NSScreen.main, let w = window else { return }
-        let frame = screen.visibleFrame
-        let wSize = w.frame.size
         // чуть правее центра, чтобы не перекрывать рекордер
-        let x = frame.midX - wSize.width / 2 + 60
-        let y = frame.minY + 24
-        w.setFrameOrigin(NSPoint(x: x, y: y))
+        let origin = FloatingPanelPositioning.bottomCenterOrigin(windowSize: w.frame.size, xOffset: 60, on: screen)
+        w.setFrameOrigin(origin)
     }
 }
 
