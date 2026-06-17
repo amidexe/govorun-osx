@@ -21,6 +21,9 @@ final class HotkeyManager {
     nonisolated(unsafe) private var modifierReleasedAt: UInt64?
     nonisolated(unsafe) private var ignoreEventsUntil: UInt64 = 0
     nonisolated(unsafe) private var suppressPasteEventsUntil: UInt64 = 0
+    nonisolated(unsafe) private var hotkeyDisabledUntil: UInt64 = 0
+    nonisolated(unsafe) private var activationWindowStartedAt: UInt64?
+    nonisolated(unsafe) private var activationCountInWindow = 0
     // True, пока проглочен keyDown нашего хоткея-клавиши и ещё не пришёл парный keyUp.
     // Гарантирует симметрию: keyUp глотаем ТОЛЬКО если проглотили его keyDown.
     // Иначе ОС увидит нажатие, но не увидит отпускания → клавиша «залипнет»
@@ -30,6 +33,9 @@ final class HotkeyManager {
 
     nonisolated private static let modifierInterruptionWindowNanos: UInt64 = 1_000_000_000
     nonisolated private static let modifierBounceWindowNanos: UInt64 = 120_000_000
+    nonisolated private static let activationStormWindowNanos: UInt64 = 2_000_000_000
+    nonisolated private static let activationStormCooldownNanos: UInt64 = 5_000_000_000
+    nonisolated private static let activationStormThreshold = 6
 
     var isActive: Bool { eventTap != nil }
 
@@ -40,6 +46,9 @@ final class HotkeyManager {
         modifierPressedAt = nil
         modifierReleasedAt = nil
         keyHotkeyDown = false
+        hotkeyDisabledUntil = 0
+        activationWindowStartedAt = nil
+        activationCountInWindow = 0
     }
 
     @discardableResult
@@ -87,6 +96,9 @@ final class HotkeyManager {
         modifierPressedAt = nil
         modifierReleasedAt = nil
         keyHotkeyDown = false
+        hotkeyDisabledUntil = 0
+        activationWindowStartedAt = nil
+        activationCountInWindow = 0
     }
 
     func suspendForRecorder() {
@@ -97,6 +109,8 @@ final class HotkeyManager {
         modifierIsDown = false
         modifierPressedAt = nil
         modifierReleasedAt = nil
+        activationWindowStartedAt = nil
+        activationCountInWindow = 0
         armAfterTapChange(seconds: 0.3)
         // keyHotkeyDown НЕ сбрасываем здесь: если клавиша ещё зажата, тап
         // продолжит глотать автоповтор. Флаг обнулится сам, когда придёт keyUp.
@@ -118,16 +132,20 @@ final class HotkeyManager {
             return Unmanaged.passUnretained(event)
         }
 
-        if DispatchTime.now().uptimeNanoseconds < suppressPasteEventsUntil,
+        let now = DispatchTime.now().uptimeNanoseconds
+
+        if now < hotkeyDisabledUntil {
+            resetPressedState()
+            return Unmanaged.passUnretained(event)
+        }
+
+        if now < suppressPasteEventsUntil,
            isSyntheticPasteEvent(type: type, event: event) {
             return Unmanaged.passUnretained(event)
         }
 
-        if DispatchTime.now().uptimeNanoseconds < ignoreEventsUntil {
-            modifierIsDown = false
-            modifierPressedAt = nil
-            modifierReleasedAt = nil
-            keyHotkeyDown = false
+        if now < ignoreEventsUntil {
+            resetPressedState()
             return Unmanaged.passUnretained(event)
         }
 
@@ -202,14 +220,18 @@ final class HotkeyManager {
         let kc       = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
         let cgFlags  = event.flags
         let expected = cfg.cgModifiers
+        let activeModifiers = shortcutModifiers(in: cgFlags)
 
         if !modifierIsDown {
             guard kc == cfg.keyCode else { return Unmanaged.passUnretained(event) }
-            guard cgFlags.contains(expected) else { return Unmanaged.passUnretained(event) }
+            guard activeModifiers == expected else { return Unmanaged.passUnretained(event) }
             let now = DispatchTime.now().uptimeNanoseconds
             if let modifierReleasedAt,
                now - modifierReleasedAt < Self.modifierBounceWindowNanos {
                 return nil
+            }
+            guard recordShortcutActivation(now: now) else {
+                return Unmanaged.passUnretained(event)
             }
             modifierIsDown = true
             modifierPressedAt = now
@@ -226,6 +248,14 @@ final class HotkeyManager {
                 Task { @MainActor in self.onKeyUp?() }
                 return nil
             }
+            if activeModifiers != expected {
+                if shouldAbortModifierShortcutForChord() {
+                    resetPressedState()
+                    armAfterTapChange(seconds: 0.3)
+                    Task { @MainActor in self.onKeyAborted?() }
+                }
+                return Unmanaged.passUnretained(event)
+            }
             // Не глотаем события других модификаторов — иначе их состояние
             // зависнет в ОС и последующий ввод станет непредсказуемым.
             return Unmanaged.passUnretained(event)
@@ -241,6 +271,48 @@ final class HotkeyManager {
         guard let modifierPressedAt else { return true }
         let elapsed = DispatchTime.now().uptimeNanoseconds - modifierPressedAt
         return elapsed <= Self.modifierInterruptionWindowNanos
+    }
+
+    nonisolated private func resetPressedState() {
+        modifierIsDown = false
+        modifierPressedAt = nil
+        modifierReleasedAt = nil
+        keyHotkeyDown = false
+    }
+
+    nonisolated private func recordShortcutActivation(now: UInt64) -> Bool {
+        if let startedAt = activationWindowStartedAt,
+           now - startedAt <= Self.activationStormWindowNanos {
+            activationCountInWindow += 1
+        } else {
+            activationWindowStartedAt = now
+            activationCountInWindow = 1
+        }
+
+        guard activationCountInWindow <= Self.activationStormThreshold else {
+            hotkeyDisabledUntil = now + Self.activationStormCooldownNanos
+            activationWindowStartedAt = nil
+            activationCountInWindow = 0
+            resetPressedState()
+            Task { @MainActor in
+                DiagnosticsLog.record(
+                    "Хоткей временно приостановлен на 5 с из-за серии срабатываний.",
+                    category: "Хоткей",
+                    level: .warning
+                )
+            }
+            return false
+        }
+
+        return true
+    }
+
+    nonisolated private func shortcutModifiers(in flags: CGEventFlags) -> CGEventFlags {
+        flags.intersection(Self.shortcutModifierMask)
+    }
+
+    nonisolated private static var shortcutModifierMask: CGEventFlags {
+        CGEventFlags([.maskCommand, .maskControl, .maskAlternate, .maskShift])
     }
 
     nonisolated private func isSyntheticPasteEvent(type: CGEventType, event: CGEvent) -> Bool {

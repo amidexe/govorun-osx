@@ -82,6 +82,10 @@ if ! rg -q "modifierInterruptionWindowNanos|shouldAbortModifierShortcutForChord|
     fail "modifier-only hotkeys should keep normal key chords usable, VoiceInk-style"
 fi
 
+if ! rg -q "shortcutModifiers\\(in: cgFlags\\)|activeModifiers == expected|activationStormCooldownNanos|hotkeyDisabledUntil|recordShortcutActivation" "$ROOT/Govorun/Hotkey/HotkeyManager.swift"; then
+    fail "modifier-only hotkeys should require exact modifiers and self-throttle event storms"
+fi
+
 if ! rg -q "sign_app.sh" "$ROOT/Makefile" "$ROOT/scripts/install_app.sh"; then
     fail "build and install should sign the app bundle so icons/resources and macOS permissions are stable"
 fi
